@@ -1,0 +1,4 @@
+manim>=0.18
+sherpa-onnx>=1.12
+huggingface_hub
+numpy

@@ -1,0 +1,5 @@
+build/
+voices/
+media/
+__pycache__/
+output/*_preview.*
