@@ -89,7 +89,8 @@ SUB_NOTES = [                   # (root, start, end[, attack_s])
 TICKS = [(0.8, -12.0)]
 TICKS += [(t, -18.0) for t in grid(3.2, 6.4, BEAT)]          # bar 2, soft quarters
 TICKS += [(t, -12.0) for t in grid(6.4, 12.8, BEAT)]         # bars 3-4 (incl. 12.0)
-TICKS += [(t, 2.0, 1.6) for t in grid(48.4, 51.0, E16)]      # 13 quadtree ticks 48.4..50.8 (none at 51.0); bright click
+TICKS += [(t, 2.0 + 9.0 * i / 12, 1.6, 2500.0 * 2.0 ** (i / 12))             # 13 quadtree ticks 48.4..50.8 (none at
+          for i, t in enumerate(grid(48.4, 51.0, E16))]                       # 51.0): +0 -> +9 dB, click 2.5 -> 5 kHz
 TICKS += [(75.2, -8.0)]                                      # final tick
 STEP_TICKS = [38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
 STEP_ACCENTS = [38.4, 41.6]                                   # the two collapses (+6 dB, under the bright pad)
@@ -107,8 +108,8 @@ PLUCKS += [(19.2, "A3", 1.0), (19.4, "C4", 2.0), (19.6, "E4", 3.0), (19.8, "A4",
 PLUCKS += _ostinato(20.0, 24.0, ["A3", "E4"])
 PLUCKS += _ostinato(24.0, 27.2, ["A3", "E4", "A4", "E4"])                  # doubles (four lanes)
 PLUCKS += _ostinato(27.2, 28.8, ["A3", "E4"])                              # back to two notes
-PLUCKS += [(t, n, 1.0 + 0.6 * i) for i, (t, n) in enumerate(zip(grid(28.8, 32.0, E8),
-           ["A3", "C4", "E4", "A4", "C5", "E5", "A5", "C6"]))]                  # fill: crescendo +1 -> +5 dB
+PLUCKS += [(t, n, 6.0 + 6.0 * i / 7) for i, (t, n) in enumerate(zip(grid(28.8, 32.0, E8),
+           ["A3", "C4", "E4", "A4", "C5", "E5", "A5", "C6"]))]                  # fill leads: +6 -> +12 dB, C6 loudest pluck
 PLUCKS += _ostinato(32.0, 38.4, ["A3", "E4"])                              # under Fmaj7
 PLUCKS += _ostinato(38.4, 41.6, ["D4", "A4"])                              # Dm9: D4-A4
 PLUCKS += _ostinato(41.6, 46.4, ["G3", "D4"])                              # G(add9) rise
@@ -137,20 +138,27 @@ SHIMMER += [(t, SHIMMER_NOTES[i % 4], -20.0) for i, t in enumerate(grid(60.8, 70
 SHIMMER_DELAY = (1.6, 0.5, 0.5)
 
 RISER = (41.6, 48.0, 200.0, 8000.0, "A3", "A5")              # start, end (peak sample), bp sweep, sine glide
+AIRS = [                                                     # (time, kind, peak_dBFS in the final file, decay_s)
+    (32.0, "swell", -24.0, 0.8),                             # the face: 0.8 s reversed air swell, peak on 32.0
+    (44.8, "hit", -22.0, 1.0),                               # the city: air hit, 1.0 s decay
+    (51.2, "hit", -18.0, 1.4),                               # the Earth: air hit, 1.4 s decay
+]
 SWELL = (46.4, 48.0)                                         # time-reversed pad-plate swell
 CODA = (70.4, 74.4, 1.6)                                     # start, release start, release length
 
 # --- energy curve per bar (§2.4); bar 15 = (first half, vacuum half) ---------
+# Mapped to a fader ride of ENERGY_DB_PER_DECADE * log10(E) (14 -> 0.05 = -18 dB, 0.3 = -7 dB, 1 = 0 dB)
+ENERGY_DB_PER_DECADE = 14.0
 ENERGY = [0.05, 0.08, 0.12, 0.16, 0.26, 0.30, 0.36, 0.46, 0.50, 0.58, 0.50, 0.60, 0.64, 0.74,
           (0.82, 0.30), 1.00, 0.92, 0.84, 0.70, 0.36, 0.34, 0.30, 0.20, 0.08]
 
 # --- levels (linear gain unless _DB) -----------------------------------------
 G = dict(
-    pixel=0.09, partials=1.0, sub=0.33, pad=0.45, pluck=0.32, kick=0.75, hat=0.55,
+    pixel=0.09, partials=1.0, sub=0.33, pad=0.45, pluck=0.57, kick=1.06, hat=0.55,
     tick=0.55, step=1.4, riser=0.30, swell=0.30, impact=0.85, shimmer=0.9, coda=0.5,
     wet=0.35,                       # plate return level vs dry
     send=dict(pad=1.0, pluck=0.45, hat=0.35, tick=0.12, riser=0.35, impact=0.9,
-              shimmer=0.7, coda=0.6, kick=0.0, sub=0.0),
+              shimmer=0.7, coda=0.6, kick=0.0, sub=0.0, air=0.6),
     duck_db=-3.0, duck_release_s=0.2,
     vacuum_pad_db=-12.0, vacuum_wet_keep=0.2, gate_ramp_s=0.005,
     lufs_target=-14.0, ceiling_dbtp=-1.0, ride_limit_db=10.0,
@@ -228,8 +236,8 @@ def tone(freq, dur, attack, release, gain=1.0, curve="exp"):
     return gain * sine(freq, n / SR)[:n] * adsr(dur, attack, 0.0, 1.0, release, curve)[:n]
 
 
-def tick_sound(click=1.0):
-    """30 ms 110 Hz burst, 2 ms attack, + 8 ms 2.5 kHz click (``click`` = its level)."""
+def tick_sound(click=1.0, freq=2500.0):
+    """30 ms 110 Hz burst, 2 ms attack, + 8 ms click at ``freq`` (``click`` = its level)."""
     n = n_samples(0.03)
     t = np.arange(n) / SR
     y = np.sin(2 * np.pi * 110.0 * t) * np.exp(-t / 0.012)
@@ -237,7 +245,7 @@ def tick_sound(click=1.0):
     if click > 0:
         nc = n_samples(0.008)
         tc = np.arange(nc) / SR
-        c = np.sin(2 * np.pi * 2500.0 * tc) * np.exp(-tc / 0.0028)
+        c = np.sin(2 * np.pi * freq * tc) * np.exp(-tc / 0.0028)
         y[:nc] += 0.6 * click * fade(c, 0.2, 2.0)
     return y
 
@@ -295,6 +303,30 @@ def riser_sound():
         y[-1] = np.sign(y[-1] or 1.0) * m * 1.001
     tail = n_samples(0.005)                 # 5 ms release after the peak (under the impact)
     return np.concatenate([y, y[-1] * (0.5 + 0.5 * np.cos(np.linspace(0, np.pi, tail)))])
+
+
+def air_swell(dur=0.8, seed=31):
+    """Band-passed noise 2-8 kHz rising exponentially to its peak on the last sample."""
+    n = n_samples(dur) + 1
+    t = np.arange(n) / SR
+    nz = lowpass(highpass(noise(n / SR, "white", seed=seed)[:n], 2000.0), 8000.0)
+    y = nz * np.exp(6.0 * (t / t[-1] - 1.0))          # -52 dB -> 0 dB
+    y[:n_samples(0.02)] *= np.linspace(0, 1, n_samples(0.02))
+    m = np.abs(y[:-1]).max()
+    if abs(y[-1]) <= m:
+        y[-1] = np.sign(y[-1] or 1.0) * m * 1.001      # the peak sample is the last one
+    tail = n_samples(0.003)
+    y = np.concatenate([y, y[-1] * (0.5 + 0.5 * np.cos(np.linspace(0, np.pi, tail)))])
+    return S._norm_peak(y, 1.0)
+
+
+def air_hit(decay_s=1.0, seed=32):
+    """Noise 3-9 kHz with an exponential decay (tau = decay_s / 4), 2 ms attack."""
+    n = n_samples(decay_s * 1.6)
+    t = np.arange(n) / SR
+    nz = lowpass(highpass(noise(n / SR, "white", seed=seed)[:n], 3000.0), 9000.0)
+    y = nz * np.exp(-t / (decay_s / 4.0)) * np.clip(t / 0.002, 0, 1)
+    return S._norm_peak(fade(y, 0.5, 30.0), 1.0)
 
 
 def plate_ir(decay_s=4.0, seed=11, predelay_ms=10.0):
@@ -414,8 +446,8 @@ def render(verbose=True):
     for i, (t, gdb) in enumerate(HATS):
         bus["hat"].add(hat_sound(300 + i), t, gain=G["hat"] * db2lin(gdb), pan=0.2)
     for ev in TICKS:
-        t, gdb, click = (ev + (1.0,))[:3]
-        bus["tick"].add(tick_sound(click), t, gain=G["tick"] * db2lin(gdb))
+        t, gdb, click, freq = (ev + (1.0, 2500.0))[:4]
+        bus["tick"].add(tick_sound(click, freq), t, gain=G["tick"] * db2lin(gdb))
     for i, t in enumerate(STEP_TICKS):
         acc = 6.0 if t in STEP_ACCENTS else 0.0
         bus["tick"].add(step_tick(500 + i), t, gain=G["step"] * db2lin(-16.0 + acc), pan=-0.15)
@@ -444,6 +476,9 @@ def render(verbose=True):
     duck = duck_curve(KICKS)[:, None]
     pad *= duck
     sub = bus["sub"].buf * duck
+    sub *= automation([(bar_t(8), 1.0), (bar_t(8) + 0.05, db2lin(-2)), (bar_t(11), db2lin(-2)),      # pedal -2 dB
+                       (bar_t(11) + 0.05, 1.0), (bar_t(12), 1.0), (bar_t(12) + 0.05, db2lin(-2)),  # under the kick
+                       (bar_t(20), db2lin(-2)), (bar_t(20) + 0.05, 1.0)])[:, None]
     vac = gate_curve([VACUUM])[:, None]
     sub *= vac
     plk *= vac
@@ -467,7 +502,20 @@ def render(verbose=True):
     # --- fader ride to the §2.4 energy curve, then master ------------------------------
     ride = energy_ride(mix)
     mix *= ride[:, None]
-    mix, lufs_pre = normalize_lufs(mix, G["lufs_target"])
+    lufs_pre = measure_lufs(mix)
+    norm = float(db2lin(G["lufs_target"] - lufs_pre))
+    # air landings: added after the ride so their peaks land at the specified final levels
+    wet_gate = gate_curve([VACUUM], keep=G["vacuum_wet_keep"])[:, None]
+    air_dry, air_wet = Track(TOTAL_S), Track(TOTAL_S)
+    for i, (t, kind, peak_db, dec) in enumerate(AIRS):
+        snd = air_swell(dec, seed=31 + i) if kind == "swell" else air_hit(dec, seed=31 + i)
+        at = (n_samples(t) - (n_samples(dec) + 1)) / SR if kind == "swell" else t
+        amp = float(db2lin(peak_db)) / norm
+        air_dry.add(snd, at, gain=amp)
+        air_wet.add(convolve_stereo(S.to_stereo(snd), ir), at, gain=amp * G["send"]["air"])
+    layers["air"] = air_dry.buf
+    mix = mix + air_dry.buf + G["wet"] * air_wet.buf * wet_gate
+    mix *= norm
     hit_win = (n_samples(HIT_T), n_samples(HIT_T + 0.35))          # the hit itself, before the first tick
     peak_in = S.peak_dbfs(mix[hit_win[0]:hit_win[1]])
     ceiling = G["ceiling_dbtp"] - 0.2
@@ -505,8 +553,9 @@ def energy_ride(mix):
         meas.append(np.sqrt(np.mean(seg ** 2)) + 1e-9)
     ref_i = centres.index(15 * BAR + 1.6)   # bar 16 is the reference (energy 1.0)
     meas = np.array(meas)
-    ratio = (np.array(targets) * meas[ref_i]) / meas
-    ride_db = np.clip(20 * np.log10(ratio), -G["ride_limit_db"], G["ride_limit_db"])
+    target_db = ENERGY_DB_PER_DECADE * np.log10(np.array(targets))
+    meas_db = 20 * np.log10(meas / meas[ref_i])
+    ride_db = np.clip(target_db - meas_db, -G["ride_limit_db"], G["ride_limit_db"])
     ride_db[ref_i] = 0.0
     # interpolate in dB, but step (not glide) across the vacuum boundaries and the impact
     pts = list(zip(centres, ride_db))
@@ -521,6 +570,23 @@ def energy_ride(mix):
     g = 10 ** (curve / 20.0)
     g[i_v0 - n_samples(0.005):i_v0] = np.linspace(g[i_v0 - n_samples(0.005) - 1], g[i_v0], n_samples(0.005))
     return g
+
+
+def loudness_range(x, sr=SR):
+    """EBU R128 loudness range (LU): 3 s short-term windows, 10th-95th percentile after gating."""
+    from scipy.signal import sosfilt
+    y = sosfilt(S._k_weighting_sos(sr), S.to_stereo(x), axis=0)
+    win, hop = n_samples(3.0), n_samples(0.5)
+    cs = np.concatenate([np.zeros((1, 2)), np.cumsum(y * y, axis=0)])
+    starts = np.arange(0, len(y) - win, hop)
+    z = ((cs[starts + win] - cs[starts]) / win).sum(axis=1)
+    st = -0.691 + 10 * np.log10(np.maximum(z, 1e-30))
+    st = st[st > -70.0]
+    if len(st) == 0:
+        return 0.0
+    rel = -0.691 + 10 * np.log10(np.mean(10 ** ((st + 0.691) / 10))) - 20.0
+    st = st[st > rel]
+    return float(np.percentile(st, 95) - np.percentile(st, 10))
 
 
 def true_peak_dbtp(x):
@@ -551,10 +617,15 @@ def band_views(m):
             "step": bandpass(m, 4200.0, 1.4)}
 
 
-def hit_onset_db(views, t, kind):
-    """Best band for the hit type: ticks by their 2.5 kHz click (10 ms), kicks by LF or
+def hit_onset_db(views, t, kind, freq=None):
+    """Best band for the hit type: ticks by their click band (8 ms), kicks by LF or
     their click, plucks by their attack (> 600 Hz or > 1.5 kHz)."""
     if kind == "click":
+        if freq is not None and abs(freq - 2500.0) > 1.0:
+            key = ("click", round(freq))
+            if key not in views:
+                views[key] = bandpass(views["full"], freq, 1.5)
+            return onset_db(views[key], t, win=0.008)
         return onset_db(views["click"], t, win=0.008)
     if kind == "lf":
         return max(onset_db(views["lf"], t, win=0.04), onset_db(views["hf"], t, win=0.01))
@@ -577,17 +648,19 @@ def verify(master, layers, info):
     ok &= nan == 0
     tp = true_peak_dbtp(master)
     lufs = measure_lufs(master)
+    lra = loudness_range(master)
     print(f"true peak            : {tp:.2f} dBTP (ceiling {G['ceiling_dbtp']}), sample peak {S.peak_dbfs(master):.2f} dBFS")
-    print(f"integrated loudness  : {lufs:.2f} LUFS (pre-normalisation {info['lufs_pre']:.2f}); limiter ceiling used {info['limiter_ceiling']:.2f} dB, gain change at the hit {info['gr_at_hit_db']:+.2f} dB")
+    print(f"integrated loudness  : {lufs:.2f} LUFS (pre-normalisation {info['lufs_pre']:.2f}); LRA {lra:.1f} LU; limiter ceiling used {info['limiter_ceiling']:.2f} dB, gain change at the hit {info['gr_at_hit_db']:+.2f} dB")
     ok &= tp <= G["ceiling_dbtp"] + 0.05
+    ok &= abs(lufs - G["lufs_target"]) <= 0.3
     # per-bar RMS vs energy curve
     rms = np.array([rms_dbfs(m[n_samples(i * BAR):n_samples((i + 1) * BAR)]) for i in range(24)])
     tgt = np.array([e if not isinstance(e, tuple) else e[0] for e in ENERGY])
-    tgt_db = 20 * np.log10(tgt) + rms[15]
+    tgt_db = ENERGY_DB_PER_DECADE * np.log10(tgt) + rms[15]
     print("bar  rms(dBFS) target  ride")
     for i in range(24):
         print(f"{i + 1:3d}  {rms[i]:7.2f}  {tgt_db[i]:7.2f}  {info['ride_db'][i]:+5.1f}")
-    corr = np.corrcoef(rms, 20 * np.log10(tgt))[0, 1]
+    corr = np.corrcoef(rms, np.log10(tgt))[0, 1]
     v_a = rms_dbfs(m[n_samples(44.8):n_samples(46.4)])
     v_b = rms_dbfs(m[n_samples(46.4):n_samples(48.0)])
     checks = {
@@ -608,15 +681,37 @@ def verify(master, layers, info):
     hits += [(t, "roll", "mid") for t in (19.2, 19.4, 19.6, 19.8)]
     hits += [(22.4, "kick+hats", "lf"), (24.0, "kick / double", "lf")] + [(t, "fill pluck", "mid") for t in grid(28.8, 32.0, E8)]
     hits += [(35.2, "kick returns", "lf")] + [(t, "step tick", "hf") for t in STEP_TICKS] + [(t, "hat accent", "hf") for t in HAT_ACCENTS]
-    hits += [(48.0, "IMPACT", "full")] + [(t, "qt tick", "click") for t in grid(48.4, 51.0, E16)]
+    hits += [(48.0, "IMPACT", "full")] + [(ev[0], "qt tick", "click", ev[3]) for ev in TICKS if len(ev) == 4 and 48.4 <= ev[0] <= 50.8]
+    hits += [(32.0, "air swell", "air"), (44.8, "air hit", "air"), (51.2, "air hit", "air")]
     hits += [(51.2, "Fmaj7 kick", "lf"), (54.4, "G kick", "lf"), (57.6, "Cmaj9 kick", "lf"), (75.2, "final tick", "click")]
     views = band_views(m)
     print("onsets (energy 30 ms after vs 50 ms before, dB; band-limited per hit type: " + ", ".join(f"{k} = {v}" for k, v in BANDS.items()) + "):")
-    for t, name, band in hits:
-        d = hit_onset_db(views, t, band)
-        flag = "OK" if d > 3.0 else "FAIL"
+    lf40 = lowpass(m, 150.0, order=4)
+    hf40 = highpass(m, 1200.0, order=4)
+    print("  time   hit            band   rise   | 40 ms windows: LF<150 Hz  HF>1.2 kHz")
+    qt_hf = []
+    for ev in hits:
+        t, name, band = ev[:3]
+        freq = ev[3] if len(ev) > 3 else None
+        if band == "air":
+            d = onset_db(views["hf"], t, win=0.04, pre=0.04) if name == "air hit" else \
+                -onset_db(views["hf"], t, win=0.04, pre=0.04)   # swell: energy falls after its peak
+            flag = "OK" if d > 3.0 else "FAIL"
+        else:
+            d = hit_onset_db(views, t, band, freq)
+            flag = "OK" if d > 3.0 else "FAIL"
         ok &= d > 3.0
-        print(f"  {t:6.2f} {name:14s} [{band:4s}] {d:+6.1f} {flag}")
+        lf_r = onset_db(lf40, t, win=0.04, pre=0.04)
+        hf_r = onset_db(hf40, t, win=0.04, pre=0.04)
+        if name == "qt tick":
+            qt_hf.append(hf_r)
+        print(f"  {t:6.2f} {name:14s} [{band:5s}] {d:+6.1f} {flag:4s} | LF {lf_r:+6.1f}  HF {hf_r:+6.1f}")
+    qt_ok = min(qt_hf) >= 8.0
+    print(f"quadtree ticks HF(>1.2 kHz, 40 ms) rise: min {min(qt_hf):+.1f} dB, max {max(qt_hf):+.1f} dB -> {'OK' if qt_ok else 'FAIL'} (>= +8 dB required)")
+    ok &= qt_ok
+    for t, kind, peak_db, dec in AIRS:
+        seg = m[n_samples(t - (dec if kind == "swell" else 0.0)):n_samples(t + (0.003 if kind == "swell" else dec))]
+        print(f"  air {kind:5s} at {t:5.1f}: peak {S.peak_dbfs(seg):+.1f} dBFS (spec {peak_db:+.0f}), peak sample at {(np.argmax(np.abs(seg)) + n_samples(t - (dec if kind == 'swell' else 0.0))) / SR:.4f} s")
     d51 = max(hit_onset_db(views, 51.0, b) for b in ("click", "hf", "lf"))
     d51_mid = hit_onset_db(views, 51.0, "mid")
     print(f"  51.00 (must be silent)      {d51:+6.1f} in the tick/kick bands {'OK' if d51 < 1.0 else 'FAIL'}"

@@ -16,7 +16,7 @@ for s in range(0, len(files), cols*rows):
     for i, f in enumerate(chunk):
         im = Image.open(f).convert('RGB').resize((tw, th), Image.LANCZOS); x, y = (i%cols)*tw, (i//cols)*th
         sheet.paste(im, (x, y)); t = (s+i)*0.8
-        d.rectangle([x, y, x+96, y+28], fill=(0,0,0)); d.text((x+6, y+3), f'{t:5.1f}s b{int(t//3.2)+1}.{int((t%3.2)//0.8)+1}', fill=(255,220,0), font=font)
+        d.rectangle([x, y, x+96, y+28], fill=(0,0,0)); d.text((x+6, y+3), f'{t:5.1f}s b{int(t//3.2)+1}.{int(round((t%3.2)/0.8))%4+1}', fill=(255,220,0), font=font)
     sheet.save(f'{out}/beats_sheet_{s//(cols*rows)+1}.jpg', quality=90)
 print(len(files), 'beat frames')
 PY

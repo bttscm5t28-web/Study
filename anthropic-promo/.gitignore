@@ -1,5 +1,6 @@
 assets/fonts/NotoSansSC-*.ttf
 assets/fonts/NotoSerifSC-*.ttf
+!assets/fonts/*.sub.ttf
 build/
 node_modules/
 music/track.wav
