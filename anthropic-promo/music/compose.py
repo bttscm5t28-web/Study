@@ -98,7 +98,8 @@ QT_TICKS = [(t, 0.30, 0.30 * 10 ** (9.7 / 20 * i / 12), 2500.0 * 2.0 ** (i / 12)
 QT_CLICK_TAU = 0.004                                         # click decay inside its 8 ms
 STEP_TICKS = [24.0, 25.6, 27.2,                              # agent line fork / face 30->15 px / merge
               38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
-STEP_ACCENTS = [38.4, 41.6]                                   # the two collapses (+6 dB, under the bright pad)
+STEP_ACCENTS = {38.4: 6.0, 41.6: 6.0,                         # the two collapses (+6 dB, under the bright pad)
+                27.2: 2.0}                                    # the merge snap shares its instant with kick + pluck + hat
 
 # --- plucks: (time, note) ----------------------------------------------------
 def _ostinato(t0, t1, notes):
@@ -456,7 +457,7 @@ def render(verbose=True):
     for t, b_amp, c_amp, f in QT_TICKS:
         bus["tick"].add(tick_sound(c_amp / 0.6, f, QT_CLICK_TAU, b_amp), t, gain=1.0)
     for i, t in enumerate(STEP_TICKS):
-        acc = 6.0 if t in STEP_ACCENTS else 0.0
+        acc = STEP_ACCENTS.get(t, 0.0)
         bus["tick"].add(step_tick(500 + i), t, gain=G["step"] * db2lin(-16.0 + acc), pan=-0.15)
 
     # --- riser, reversed swell, impact ------------------------------------------------
