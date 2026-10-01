@@ -58,7 +58,7 @@ PAD_CHORDS = [
     (32.0, 38.4, ["F2", "C3", "A3", "C4", "E4"], 0.4, 0.6, 0.0),          # Fmaj7 lift
     (38.4, 41.6, ["D3", "F3", "A3", "C4", "E4"], 0.3, 0.5, 0.0),          # Dm9 turn
     (41.6, 48.0, ["G2", "D3", "B3", "D4", "A4"], 0.3, 0.3, 0.0),          # G(add9) rise (held -12 dB in vacuum)
-    (48.0, 51.2, ["A2", "E3", "A3", "C4", "E4", "B4"], 0.08, 0.5, 0.0),   # IMPACT: full Am(add9) stack
+    (48.0, 51.2, ["A2", "E3", "A3", "C4", "E4", "B4"], 0.08, 0.5, -3.5),  # IMPACT: full Am(add9) stack (-3.5 dB: air for the ticks)
     (51.2, 54.4, ["F2", "C3", "A3", "C4", "E4"], 0.3, 0.5, 0.0),          # Fmaj7
     (54.4, 57.6, ["G2", "D3", "G3", "B3", "D4"], 0.3, 0.5, 0.0),          # G
     (57.6, 60.8, ["C3", "E3", "G3", "B3", "D4"], 0.3, 0.6, 0.0),          # Cmaj9 half-time
@@ -89,9 +89,13 @@ SUB_NOTES = [                   # (root, start, end[, attack_s])
 TICKS = [(0.8, -12.0)]
 TICKS += [(t, -18.0) for t in grid(3.2, 6.4, BEAT)]          # bar 2, soft quarters
 TICKS += [(t, -12.0) for t in grid(6.4, 12.8, BEAT)]         # bars 3-4 (incl. 12.0)
-TICKS += [(t, 2.0 + 9.0 * i / 12, 1.6, 2500.0 * 2.0 ** (i / 12))             # 13 quadtree ticks 48.4..50.8 (none at
-          for i, t in enumerate(grid(48.4, 51.0, E16))]                       # 51.0): +0 -> +9 dB, click 2.5 -> 5 kHz
 TICKS += [(75.2, -8.0)]                                      # final tick
+# 13 quadtree ticks 48.4..50.8 (none at 51.0): (time, burst_amp, click_amp, click_hz) in pre-master amplitude.
+# The click ramps +9.7 dB (0.30 -> 0.92) and rises log-linearly 2.5 -> 5 kHz (resolution rising); the 110 Hz
+# burst stays quiet so the ticks never drive the limiter (which would pull the pad down with them).
+QT_TICKS = [(t, 0.30, 0.30 * 10 ** (9.7 / 20 * i / 12), 2500.0 * 2.0 ** (i / 12))
+            for i, t in enumerate(grid(48.4, 51.0, E16))]
+QT_CLICK_TAU = 0.004                                         # click decay inside its 8 ms
 STEP_TICKS = [38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
 STEP_ACCENTS = [38.4, 41.6]                                   # the two collapses (+6 dB, under the bright pad)
 
@@ -155,9 +159,9 @@ ENERGY = [0.05, 0.08, 0.12, 0.16, 0.26, 0.30, 0.36, 0.46, 0.50, 0.58, 0.50, 0.60
 # --- levels (linear gain unless _DB) -----------------------------------------
 G = dict(
     pixel=0.09, partials=1.0, sub=0.33, pad=0.45, pluck=0.57, kick=1.06, hat=0.55,
-    tick=0.55, step=1.4, riser=0.30, swell=0.30, impact=0.85, shimmer=0.9, coda=0.5,
+    tick=0.55, step=1.4, riser=0.30, swell=0.30, impact=1.0, shimmer=0.9, coda=0.5,
     wet=0.35,                       # plate return level vs dry
-    send=dict(pad=1.0, pluck=0.45, hat=0.35, tick=0.12, riser=0.35, impact=0.9,
+    send=dict(pad=1.0, pluck=0.45, hat=0.35, tick=0.05, riser=0.35, impact=0.9,
               shimmer=0.7, coda=0.6, kick=0.0, sub=0.0, air=0.6),
     duck_db=-3.0, duck_release_s=0.2,
     vacuum_pad_db=-12.0, vacuum_wet_keep=0.2, gate_ramp_s=0.005,
@@ -236,16 +240,17 @@ def tone(freq, dur, attack, release, gain=1.0, curve="exp"):
     return gain * sine(freq, n / SR)[:n] * adsr(dur, attack, 0.0, 1.0, release, curve)[:n]
 
 
-def tick_sound(click=1.0, freq=2500.0):
-    """30 ms 110 Hz burst, 2 ms attack, + 8 ms click at ``freq`` (``click`` = its level)."""
+def tick_sound(click=1.0, freq=2500.0, tau=0.0028, burst=1.0):
+    """30 ms 110 Hz burst (amplitude ``burst``, 2 ms attack) + 8 ms click at ``freq``
+    (amplitude 0.6 * ``click``, decay ``tau``)."""
     n = n_samples(0.03)
     t = np.arange(n) / SR
-    y = np.sin(2 * np.pi * 110.0 * t) * np.exp(-t / 0.012)
+    y = burst * np.sin(2 * np.pi * 110.0 * t) * np.exp(-t / 0.012)
     y = fade(y, 2.0, 4.0)
     if click > 0:
         nc = n_samples(0.008)
         tc = np.arange(nc) / SR
-        c = np.sin(2 * np.pi * freq * tc) * np.exp(-tc / 0.0028)
+        c = np.sin(2 * np.pi * freq * tc) * np.exp(-tc / tau)
         y[:nc] += 0.6 * click * fade(c, 0.2, 2.0)
     return y
 
@@ -367,8 +372,8 @@ def impact_sound(ir):
     drop = np.sin(2 * np.pi * (np.cumsum(f) - f) / SR) * np.exp(-t / 0.45)
     drop *= np.clip(t / 0.004, 0, 1)
     body = S.pad_to(lowpass(synth_kick(0.9, 190.0, 42.0, click=0.3, seed=9), 1500.0), n)
-    dry = 0.55 * burst + 0.95 * drop + 0.7 * body
-    dry = S.softclip(dry, 1.2)
+    dry = 0.3 * burst + 1.0 * drop + 0.3 * body
+    dry = S.softclip(dry, 1.6)
     return S._norm_peak(fade(dry, 0.3, 200.0), 1.0)
 
 
@@ -445,9 +450,10 @@ def render(verbose=True):
         bus["kick"].add(kk, t, gain=G["kick"])
     for i, (t, gdb) in enumerate(HATS):
         bus["hat"].add(hat_sound(300 + i), t, gain=G["hat"] * db2lin(gdb), pan=0.2)
-    for ev in TICKS:
-        t, gdb, click, freq = (ev + (1.0, 2500.0))[:4]
-        bus["tick"].add(tick_sound(click, freq), t, gain=G["tick"] * db2lin(gdb))
+    for t, gdb in TICKS:
+        bus["tick"].add(tick_sound(), t, gain=G["tick"] * db2lin(gdb))
+    for t, b_amp, c_amp, f in QT_TICKS:
+        bus["tick"].add(tick_sound(c_amp / 0.6, f, QT_CLICK_TAU, b_amp), t, gain=1.0)
     for i, t in enumerate(STEP_TICKS):
         acc = 6.0 if t in STEP_ACCENTS else 0.0
         bus["tick"].add(step_tick(500 + i), t, gain=G["step"] * db2lin(-16.0 + acc), pan=-0.15)
@@ -509,8 +515,8 @@ def render(verbose=True):
     air_dry, air_wet = Track(TOTAL_S), Track(TOTAL_S)
     for i, (t, kind, peak_db, dec) in enumerate(AIRS):
         snd = air_swell(dec, seed=31 + i) if kind == "swell" else air_hit(dec, seed=31 + i)
-        at = (n_samples(t) - (n_samples(dec) + 1)) / SR if kind == "swell" else t
-        amp = float(db2lin(peak_db)) / norm
+        at = (n_samples(t) - n_samples(dec)) / SR if kind == "swell" else t   # swell's peak sample = n_samples(t)
+        amp = float(db2lin(peak_db)) / norm * np.sqrt(2.0)   # mono -> equal-power centre pan is -3 dB per side
         air_dry.add(snd, at, gain=amp)
         air_wet.add(convolve_stereo(S.to_stereo(snd), ir), at, gain=amp * G["send"]["air"])
     layers["air"] = air_dry.buf
@@ -529,7 +535,7 @@ def render(verbose=True):
     master = lim * automation([(SILENCE_FROM - 0.3, 1.0), (SILENCE_FROM, 0.0)])[:, None]
     master[n_samples(SILENCE_FROM):] = 0.0
     master = S.pad_to(master, N_TOTAL)
-    info = dict(lufs_pre=lufs_pre, limiter_ceiling=ceiling, gr_at_hit_db=gr_hit,
+    info = dict(lufs_pre=lufs_pre, norm=norm, limiter_ceiling=ceiling, gr_at_hit_db=gr_hit,
                 render_s=time.time() - t_start, ride_db=20 * np.log10(ride[::n_samples(BAR)]))
     return master, layers, info
 
@@ -681,7 +687,7 @@ def verify(master, layers, info):
     hits += [(t, "roll", "mid") for t in (19.2, 19.4, 19.6, 19.8)]
     hits += [(22.4, "kick+hats", "lf"), (24.0, "kick / double", "lf")] + [(t, "fill pluck", "mid") for t in grid(28.8, 32.0, E8)]
     hits += [(35.2, "kick returns", "lf")] + [(t, "step tick", "hf") for t in STEP_TICKS] + [(t, "hat accent", "hf") for t in HAT_ACCENTS]
-    hits += [(48.0, "IMPACT", "full")] + [(ev[0], "qt tick", "click", ev[3]) for ev in TICKS if len(ev) == 4 and 48.4 <= ev[0] <= 50.8]
+    hits += [(48.0, "IMPACT", "full")] + [(t, "qt tick", "click", f) for t, _, _, f in QT_TICKS]
     hits += [(32.0, "air swell", "air"), (44.8, "air hit", "air"), (51.2, "air hit", "air")]
     hits += [(51.2, "Fmaj7 kick", "lf"), (54.4, "G kick", "lf"), (57.6, "Cmaj9 kick", "lf"), (75.2, "final tick", "click")]
     views = band_views(m)
@@ -694,13 +700,12 @@ def verify(master, layers, info):
         t, name, band = ev[:3]
         freq = ev[3] if len(ev) > 3 else None
         if band == "air":
-            d = onset_db(views["hf"], t, win=0.04, pre=0.04) if name == "air hit" else \
-                -onset_db(views["hf"], t, win=0.04, pre=0.04)   # swell: energy falls after its peak
-            flag = "OK" if d > 3.0 else "FAIL"
+            d = onset_db(views["hf"], t, win=0.04, pre=0.04)
+            flag = "info"                                     # airs are checked on their own layer below
         else:
             d = hit_onset_db(views, t, band, freq)
             flag = "OK" if d > 3.0 else "FAIL"
-        ok &= d > 3.0
+            ok &= d > 3.0
         lf_r = onset_db(lf40, t, win=0.04, pre=0.04)
         hf_r = onset_db(hf40, t, win=0.04, pre=0.04)
         if name == "qt tick":
@@ -709,9 +714,14 @@ def verify(master, layers, info):
     qt_ok = min(qt_hf) >= 8.0
     print(f"quadtree ticks HF(>1.2 kHz, 40 ms) rise: min {min(qt_hf):+.1f} dB, max {max(qt_hf):+.1f} dB -> {'OK' if qt_ok else 'FAIL'} (>= +8 dB required)")
     ok &= qt_ok
+    air = np.max(np.abs(layers["air"]), axis=1) * info["norm"]   # the air layer's per-channel peak at its final level
     for t, kind, peak_db, dec in AIRS:
-        seg = m[n_samples(t - (dec if kind == "swell" else 0.0)):n_samples(t + (0.003 if kind == "swell" else dec))]
-        print(f"  air {kind:5s} at {t:5.1f}: peak {S.peak_dbfs(seg):+.1f} dBFS (spec {peak_db:+.0f}), peak sample at {(np.argmax(np.abs(seg)) + n_samples(t - (dec if kind == 'swell' else 0.0))) / SR:.4f} s")
+        a0 = n_samples(t - (dec if kind == "swell" else 0.0))
+        seg = air[a0:n_samples(t + (0.01 if kind == "swell" else dec * 1.6))]
+        pk_t = (a0 + int(np.argmax(np.abs(seg)))) / SR
+        good = abs(S.peak_dbfs(seg) - peak_db) < 0.2 and (kind != "swell" or abs(pk_t - t) < 1e-6)
+        print(f"  air {kind:5s} at {t:5.1f}: peak {S.peak_dbfs(seg):+.1f} dBFS (spec {peak_db:+.0f}) at sample {a0 + int(np.argmax(np.abs(seg)))} = {pk_t:.5f} s -> {'OK' if good else 'FAIL'}")
+        ok &= good
     d51 = max(hit_onset_db(views, 51.0, b) for b in ("click", "hf", "lf"))
     d51_mid = hit_onset_db(views, 51.0, "mid")
     print(f"  51.00 (must be silent)      {d51:+6.1f} in the tick/kick bands {'OK' if d51 < 1.0 else 'FAIL'}"
