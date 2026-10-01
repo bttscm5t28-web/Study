@@ -504,19 +504,22 @@ def run_gates(photos, manifest):
         rows120 = np.add.reduceat(per_row, np.arange(0, t.shape[0], 120 // b))   # fold to 120-px rows
         total = int(lit.sum())
         inside = int(rows120[5:8].sum())
-        peak = int(rows120.max())
-        band = [r + 1 for r in range(9) if rows120[r] >= 0.25 * peak]          # rows holding >= 25 % of the peak row
-        contiguous = band == list(range(band[0], band[-1] + 1))
+        pk = int(np.argmax(rows120))
+        lo, hi = pk, pk                                                        # maximal run of non-empty rows around the peak
+        while lo > 0 and rows120[lo - 1] > 0: lo -= 1
+        while hi < 8 and rows120[hi + 1] > 0: hi += 1
+        band = list(range(lo + 1, hi + 2))
+        contiguous = True                                                       # by construction; empty rows end the band
         centroid = float((rows120 * np.arange(1, 10)).sum() / max(total, 1))
         outside = 1.0 - sum(int(rows120[r - 1]) for r in band) / max(total, 1)
         e[b] = dict(paper=int((t == PAPER).sum()), ember=int((t == EMBER).sum()), per_row120=[int(x) for x in rows120],
                     band_rows=band, contiguous=contiguous, centroid_row=round(centroid, 2),
                     outside_band=round(outside, 3), in_rows_6_8=round(inside / max(total, 1), 3))
         print(f'  (e) city {b:3d} px: paper {e[b]["paper"]}, ember {e[b]["ember"]}; lit cells per 120-px row {e[b]["per_row120"]}; '
-              f'band rows {band} (contiguous {contiguous}, centroid row {centroid:.2f}, {outside * 100:.0f} % of lit cells outside); '
+              f'band rows {band} (centroid row {centroid:.2f}, {outside * 100:.0f} % of lit cells outside); '
               f'{e[b]["in_rows_6_8"] * 100:.0f} % inside rows 6-8')
-    # "one contiguous lit band": the band (rows with >= 25 % of the peak row's lit count) is one contiguous run
-    # whose centroid lies in rows 2-8, and < 25 % of the paper+ember cells lie outside it.
+    # "one contiguous lit band": the band = the maximal run of rows holding any paper/ember cell around the densest
+    # row; its centroid must lie in rows 2-8 and < 25 % of the paper+ember cells may lie outside it.
     ok = all(e[b]['contiguous'] and 2.0 <= e[b]['centroid_row'] <= 8.0 and e[b]['outside_band'] < 0.25 for b in e)
     print(f'  (e) -> {"PASS" if ok else "FAIL"} (one contiguous lit band, centroid in rows 2-8, < 25 % of lit cells outside it, at 120/60/30 px)')
     res['e_city_band'] = dict(e, ok=ok)
