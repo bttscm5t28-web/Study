@@ -1,10 +1,172 @@
 {
-  "fps": 30, "width": 1920, "height": 1080,
-  "bpm": 96, "duration": 6,
-  "music": "music/track.wav",
-  "photos": [
-    {"key": "earth", "file": "assets/photos/1451187580459-43490279c0fa.jpg"},
-    {"key": "stars", "file": "assets/photos/1519681393784-d120267933ba.jpg"},
-    {"key": "face", "file": "assets/photos/1438761681033-6461ffad8d80.jpg"}
-  ]
+ "title": "从一个像素开始 · From One Pixel",
+ "fps": 30,
+ "width": 1920,
+ "height": 1080,
+ "bpm": 75,
+ "bars": 24,
+ "duration": 76.8,
+ "music": "music/track.wav",
+ "photos": [
+  {
+   "key": "face_120_tok_b55",
+   "file": "build/bake/face_120_tok_b55.png"
+  },
+  {
+   "key": "face_60_tok2_b55",
+   "file": "build/bake/face_60_tok2_b55.png"
+  },
+  {
+   "key": "face_60_tok2_b65",
+   "file": "build/bake/face_60_tok2_b65.png"
+  },
+  {
+   "key": "face_30_tok_b75",
+   "file": "build/bake/face_30_tok_b75.png"
+  },
+  {
+   "key": "face_15_c8_b85",
+   "file": "build/bake/face_15_c8_b85.png"
+  },
+  {
+   "key": "face_5_c32_b92",
+   "file": "build/bake/face_5_c32_b92.png"
+  },
+  {
+   "key": "face_1_full_b100",
+   "file": "build/bake/face_1_full_b100.png"
+  },
+  {
+   "key": "face_120_tok_b70",
+   "file": "build/bake/face_120_tok_b70.png"
+  },
+  {
+   "key": "people_120_tok_b70",
+   "file": "build/bake/people_120_tok_b70.png"
+  },
+  {
+   "key": "people_60_tok2_b80",
+   "file": "build/bake/people_60_tok2_b80.png"
+  },
+  {
+   "key": "people_30_tok_b90",
+   "file": "build/bake/people_30_tok_b90.png"
+  },
+  {
+   "key": "people_1_full_b100",
+   "file": "build/bake/people_1_full_b100.png"
+  },
+  {
+   "key": "city_120_tok_b55",
+   "file": "build/bake/city_120_tok_b55.png"
+  },
+  {
+   "key": "city_60_tok2_b62",
+   "file": "build/bake/city_60_tok2_b62.png"
+  },
+  {
+   "key": "city_30_tok_b70",
+   "file": "build/bake/city_30_tok_b70.png"
+  },
+  {
+   "key": "city_30_c8_b77",
+   "file": "build/bake/city_30_c8_b77.png"
+  },
+  {
+   "key": "city_15_c8_b85",
+   "file": "build/bake/city_15_c8_b85.png"
+  },
+  {
+   "key": "city_5_c32_b92",
+   "file": "build/bake/city_5_c32_b92.png"
+  },
+  {
+   "key": "city_5_full_b96",
+   "file": "build/bake/city_5_full_b96.png"
+  },
+  {
+   "key": "city_1_full_b100",
+   "file": "build/bake/city_1_full_b100.png"
+  },
+  {
+   "key": "city_5_c32_b90",
+   "file": "build/bake/city_5_c32_b90.png"
+  },
+  {
+   "key": "city_15_c8_b83",
+   "file": "build/bake/city_15_c8_b83.png"
+  },
+  {
+   "key": "city_60_tok2_b76",
+   "file": "build/bake/city_60_tok2_b76.png"
+  },
+  {
+   "key": "city_120_tok_b70",
+   "file": "build/bake/city_120_tok_b70.png"
+  },
+  {
+   "key": "sky_1_full_b100",
+   "file": "build/bake/sky_1_full_b100.png"
+  },
+  {
+   "key": "earth_qt_g00",
+   "file": "build/bake/earth_qt_g00.png"
+  },
+  {
+   "key": "earth_qt_g01",
+   "file": "build/bake/earth_qt_g01.png"
+  },
+  {
+   "key": "earth_qt_g02",
+   "file": "build/bake/earth_qt_g02.png"
+  },
+  {
+   "key": "earth_qt_g03",
+   "file": "build/bake/earth_qt_g03.png"
+  },
+  {
+   "key": "earth_qt_g04",
+   "file": "build/bake/earth_qt_g04.png"
+  },
+  {
+   "key": "earth_qt_g05",
+   "file": "build/bake/earth_qt_g05.png"
+  },
+  {
+   "key": "earth_qt_g06",
+   "file": "build/bake/earth_qt_g06.png"
+  },
+  {
+   "key": "earth_qt_g07",
+   "file": "build/bake/earth_qt_g07.png"
+  },
+  {
+   "key": "earth_qt_g08",
+   "file": "build/bake/earth_qt_g08.png"
+  },
+  {
+   "key": "earth_qt_g09",
+   "file": "build/bake/earth_qt_g09.png"
+  },
+  {
+   "key": "earth_qt_g10",
+   "file": "build/bake/earth_qt_g10.png"
+  },
+  {
+   "key": "earth_qt_g11",
+   "file": "build/bake/earth_qt_g11.png"
+  },
+  {
+   "key": "earth_qt_g12",
+   "file": "build/bake/earth_qt_g12.png"
+  },
+  {
+   "key": "earth_qt_g13",
+   "file": "build/bake/earth_qt_g13.png"
+  },
+  {
+   "key": "earth_qt_g14",
+   "file": "build/bake/earth_qt_g14.png"
+  }
+ ]
 }

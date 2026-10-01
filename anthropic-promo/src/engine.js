@@ -59,7 +59,7 @@
   // family keys map to loaded @font-face names
   F.fonts = { sans: 'Inter', zh: 'Noto Sans SC', serif: 'Instrument Serif', zhserif: 'Noto Serif SC', grotesk: 'Space Grotesk' };
   F.font = (size, weight = 400, fam = 'sans', italic = false) => `${italic ? 'italic ' : ''}${weight} ${size}px "${F.fonts[fam] || fam}"`;
-  // draw text with tracking (letter-spacing) support
+  // draw text with tracking (letter-spacing in em). Uses canvas letterSpacing so kerning is kept.
   F.text = (ctx, str, o) => {
     const { x = 0, y = 0, size = 48, weight = 400, fam = 'sans', color = '#fff', align = 'left', baseline = 'alphabetic', tracking = 0, alpha = 1, italic = false, blur = 0 } = o;
     if (alpha <= 0 || !str) return 0;
@@ -68,23 +68,23 @@
     ctx.font = F.font(size, weight, fam, italic);
     ctx.fillStyle = color;
     ctx.textBaseline = baseline;
-    if (blur > 0) ctx.filter = `blur(${blur}px)`;
-    const sp = tracking * size; // tracking in em
-    let total = 0;
-    const chars = Array.from(str);
-    const widths = chars.map(c => ctx.measureText(c).width);
-    total = widths.reduce((a, b) => a + b, 0) + sp * (chars.length - 1);
-    let cx = x;
-    if (align === 'center') cx = x - total / 2; else if (align === 'right') cx = x - total;
     ctx.textAlign = 'left';
-    for (let i = 0; i < chars.length; i++) { ctx.fillText(chars[i], cx, y); cx += widths[i] + sp; }
+    if (blur > 0) ctx.filter = `blur(${blur}px)`;
+    const sp = tracking * size;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = sp + 'px';
+    let w = ctx.measureText(str).width;
+    if (!('letterSpacing' in ctx)) w += sp * (Array.from(str).length - 1);
+    const visible = w - (('letterSpacing' in ctx) ? sp : 0); // trailing spacing is not ink
+    let cx = x; if (align === 'center') cx = x - visible / 2; else if (align === 'right') cx = x - visible;
+    ctx.fillText(str, cx, y);
     ctx.restore();
-    return total;
+    return visible;
   };
   F.textWidth = (ctx, str, o) => {
     const { size = 48, weight = 400, fam = 'sans', tracking = 0, italic = false } = o;
-    ctx.save(); ctx.font = F.font(size, weight, fam, italic);
-    const chars = Array.from(str); let w = 0; for (const c of chars) w += ctx.measureText(c).width; w += tracking * size * (chars.length - 1);
+    ctx.save(); ctx.font = F.font(size, weight, fam, italic); const sp = tracking * size;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = sp + 'px';
+    let w = ctx.measureText(str).width; if ('letterSpacing' in ctx) w -= sp; else w += sp * (Array.from(str).length - 1);
     ctx.restore(); return w;
   };
   // text that reveals character by character (n in 0..1)
