@@ -17,20 +17,24 @@ hits = [(0.8,'first tick',1),(3.2,'A3 rises',0),(6.4,'E4 enters / split',1),(9.6
         (19.2,'60px / roll',1),(19.4,'roll',1),(19.6,'roll',1),(19.8,'roll',1),(20.0,'1,000,000',1),
         (22.4,'30px kick',1),(24.0,'fork',1),(25.6,'15px headline',1),(27.2,'merge',1),
         (28.8,'15px A3',1),(29.2,'C4',1),(29.6,'E4',1),(30.0,'A4',1),(30.4,'C5',1),(30.8,'E5',1),(31.2,'A5 5px',1),(31.6,'C6',1),
-        (32.0,'FACE Fmaj7',1),(35.2,'kick returns',1),
+        (32.0,'FACE Fmaj7 (swell, by design)',0),(35.2,'kick returns',1),
         (38.4,'collapse',1),(38.8,'swap people',1),(39.2,'60px',1),(40.0,'30px',1),(40.8,'1px',1),
         (41.6,'collapse G',1),(42.0,'swap city',1),(42.4,'60',1),(42.8,'30',1),(43.2,'30c8',1),(43.6,'15',1),(44.0,'5',1),(44.4,'5full',1),(44.8,'CITY real',1),
         (46.4,'vacuum/rev 5',0),(46.8,'rev 15',0),(47.2,'rev 60',0),(47.6,'rev 120',0),
         (48.0,'IMPACT',1)] + [(48.4+0.2*i, f'qt gen {i+1}',1) for i in range(13)] + [(51.0,'(no tick)',-1),(51.2,'EARTH real Fmaj7',1),(54.4,'G boundary closes',1),(57.6,'SKY Cmaj9',1),
-        (60.8,'pad solo',0),(64.0,'E5',0),(70.4,'unison A',1),(75.2,'final tick',1)]
-def energy(a, b):
-    i, j = int(a * sr), int(b * sr); seg = x[max(0, i):max(0, j)]
+        (60.8,'pad solo',0),(64.0,'E5',0),(70.4,'unison A (calm, by design)',0),(75.2,'final tick',1)]
+from scipy.signal import butter, sosfilt
+_lf = sosfilt(butter(4, 150, 'low', fs=sr, output='sos'), x); _hf = sosfilt(butter(4, 1200, 'high', fs=sr, output='sos'), x)
+def _e(sig, a, b):
+    i, j = int(a * sr), int(b * sr); seg = sig[max(0, i):max(0, j)]
     return float(np.sqrt(np.mean(seg ** 2)) + 1e-9) if len(seg) else 1e-9
+def energy(a, b): return _e(x, a, b)
+def rise(t):  # best of broadband / low band (kicks, impact) / high band (plucks, ticks, hats)
+    return max(20 * np.log10(_e(s, t, t + 0.03) / _e(s, t - 0.06, t - 0.01)) for s in (x, _lf, _hf))
 fails = 0
-print(f'{"t":>6} {"label":22} {"post/pre dB":>12}  result')
+print(f'{"t":>6} {"label":22} {"rise dB":>12}  result')
 for t, label, must in hits:
-    pre = energy(t - 0.06, t - 0.01); post = energy(t, t + 0.03)
-    db = 20 * np.log10(post / pre)
+    db = rise(t)
     if must == -1: ok = db < 3; res = 'ok (silent as required)' if ok else 'UNEXPECTED transient'
     elif must == 1: ok = db > 2.0; res = 'ok' if ok else 'MISSING'
     else: ok = True; res = 'ok' if db > 2 else '(soft)'

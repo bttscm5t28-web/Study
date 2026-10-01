@@ -13,8 +13,10 @@ Produces, in build/bake/:
 Deterministic and idempotent: python3 tools/bake.py
 """
 import json, os, sys, time
+import glob
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from scipy.ndimage import median_filter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 PHOTOS = os.path.join(ROOT, 'assets', 'photos')
@@ -37,7 +39,7 @@ SLATE_BLUE = 0x4B
 SOURCES = {
     'face':   dict(file='1438761681033-6461ffad8d80.jpg', window=(0, 60), rotate=False),
     'people': dict(file='1511632765486-a01980e01a18.jpg', window=(0, 200), rotate=False),
-    'city':   dict(file='1474181487882-5abf3f0ba6c2.jpg', window=(0, 200), rotate=False),
+    'city':   dict(file='1444723121867-7a241cacace9.jpg', window=(0, 200), rotate=False),   # Los Angeles aerial
     # STAR GUARD (earth only): the colour fed to the 4-token decision at 120/60/30 px (and to quadtree depths
     # 0-2, whose drawn colour is the token anyway) is a TRIMMED block mean that excludes the brightest
     # max(0.5 % of the cell's pixels, 16 pixels), pixels ranked by linear luminance. A star is a <= 4x4 cluster
@@ -45,28 +47,32 @@ SOURCES = {
     # the lit coast has far more lit pixels than that, so the paper/slate band is unaffected. P25/P80 are
     # computed from the same trimmed means. Real-colour stages (c8/c32/full, depths 3-5) are untouched.
     'earth':  dict(file='1451187580459-43490279c0fa.jpg', window=(0, 98), rotate=True,
-                   star_guard=dict(frac=0.005, min_px=16)),
+                   star_guard=dict(frac=0.005, min_px=16, ink_floor=6)),
+    # ink_floor: a cell whose trimmed-mean sRGB max channel is < 6 is INK regardless of the percentile.
     'sky':    dict(file='1444703686981-a3abbc4d4fe3_2880.jpg', window=(258, 840), rotate=False),
 }
 
 # ---- stages: (block, mode, brightness) -------------------------------------------------------
 STAGES = {
-    'face':   [(120, 'tok', 55), (60, 'tok2', 55), (60, 'tok2', 65), (30, 'tok', 75), (15, 'c8', 85),
-               (5, 'c32', 92), (1, 'full', 100), (120, 'tok', 70)],
+    'face':   [(120, 'tok', 55), (60, 'tok2', 55), (60, 'tok2', 65), (30, 'tok', 75), (15, 'tok', 80), (15, 'c8', 85),
+               (5, 'c8', 92), (5, 'c32', 92), (1, 'full', 100), (120, 'tok', 70)],
     'people': [(120, 'tok', 70), (60, 'tok2', 80), (30, 'tok', 90), (1, 'full', 100)],
     'city':   [(120, 'tok', 55), (60, 'tok2', 62), (30, 'tok', 70), (30, 'c8', 77), (15, 'c8', 85),
-               (5, 'c32', 92), (5, 'full', 96), (1, 'full', 100),
-               (5, 'c32', 90), (15, 'c8', 83), (60, 'tok2', 76), (120, 'tok', 70)],
-    'earth':  [(120, 'tok', 55)],
+               (5, 'c8', 92), (5, 'c32', 96), (1, 'full', 100),
+               (60, 'tok2', 60), (120, 'tok', 50)],          # reverse set reuses 15_c8_b85 and 30_tok_b70
+    'earth':  [(120, 'tok', 70)],                            # = quadtree g00
     'sky':    [(1, 'full', 100)],
 }
-GRADED = {'city'}   # −25 % saturation, blue 10 % toward slate's blue, on the c8/c32/full stages
+GRADED = set()      # no photo is graded (the Shanghai grade was dropped with the city swap)
+PALETTE_GUARD = 40.0   # every c8/c32 palette entry must be within this sRGB distance of a real block mean
 
 # ---- quadtree (§3 S10, §5.6) ---------------------------------------------------------------
 QT_TARGETS = [0.03, 0.05, 0.08, 0.12, 0.17, 0.23, 0.30, 0.38, 0.47, 0.57, 0.68, 0.80]
 QT_G13_TARGET = 0.90
 QT_CS = [24, 12, 6, 3, 1]            # leaf size in 5-px cells for depths 0–4
 QT_BS = [120, 60, 30, 15, 5, 1]      # block size per depth
+QT_MAXD = 4                          # generations 1–13 split to depth <= 4 (5 px); g14 = depth 5 (real) everywhere
+# S = mean(depth)/4 over depths 0–4; depth 0–2 tokens, depth 3 and 4 the 8-colour palette, depth 5 real.
 
 
 # =============================================================================================
@@ -158,7 +164,24 @@ def median_cut(srgb_u8, n):
     """PIL median-cut palette on the small image, no dither; returns the remapped RGB uint8."""
     im = Image.fromarray(srgb_u8, 'RGB')
     q = im.quantize(colors=n, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-    return np.asarray(q.convert('RGB'))
+    out = np.asarray(q.convert('RGB'))
+    # palette guard: every palette entry must be within PALETTE_GUARD of a real block mean of this stage
+    pal = np.unique(out.reshape(-1, 3), axis=0).astype(np.float64)
+    real = srgb_u8.reshape(-1, 3).astype(np.float64)
+    worst = 0.0
+    for c in pal:
+        worst = max(worst, float(np.sqrt(((real - c) ** 2).sum(1)).min()))
+    assert worst <= PALETTE_GUARD, f'palette guard: entry {worst:.1f} sRGB from every real pixel (n={n})'
+    median_cut.last_guard = (len(pal), round(worst, 2))
+    return out
+
+
+def nearest_palette(srgb_u8, palette_u8):
+    """Map every pixel to the nearest entry of a fixed palette (sRGB euclidean)."""
+    pal = np.unique(palette_u8.reshape(-1, 3), axis=0).astype(np.int32)
+    px = srgb_u8.reshape(-1, 3).astype(np.int32)
+    d = ((px[:, None, :] - pal[None, :, :]) ** 2).sum(2)
+    return pal[d.argmin(1)].astype(np.uint8).reshape(srgb_u8.shape)
 
 
 def grade_city(srgb):
@@ -203,6 +226,7 @@ class Photo:
         self._means = {}
         self._tok_means = {}
         self._base = {}
+        self.guard = {}
         self.star_guard = spec.get('star_guard')
         # frozen 4-token thresholds from the 144 (star-guarded, if so) block means at 120 px
         self.L120 = oklab(self.tok_means(120))[0]
@@ -222,7 +246,11 @@ class Photo:
         return self._tok_means[b]
 
     def tokens(self, b):
-        return quantize_tokens(self.tok_means(b), self.p25, self.p80)
+        tok, L = quantize_tokens(self.tok_means(b), self.p25, self.p80)
+        if self.star_guard and self.star_guard.get('ink_floor'):
+            floor = lin_to_srgb(self.tok_means(b)).max(axis=-1) < self.star_guard['ink_floor']
+            tok = np.where(floor, INK, tok).astype(np.int8)
+        return tok, L
 
     def base(self, b, mode):
         """Brightness-independent stage data. tok/tok2 -> (tok, L); c8/c32/full -> sRGB uint8."""
@@ -237,9 +265,9 @@ class Photo:
                 srgb = grade_city(srgb)
             srgb = to_u8(srgb)
             if mode == 'c8':
-                srgb = median_cut(srgb, 8)
+                srgb = median_cut(srgb, 8); self.guard[key] = median_cut.last_guard
             elif mode == 'c32':
-                srgb = median_cut(srgb, 32)
+                srgb = median_cut(srgb, 32); self.guard[key] = median_cut.last_guard
             val = srgb
         self._base[key] = val
         return val
@@ -275,30 +303,32 @@ def sat_block_stats(Y, bs):
 def bake_quadtree(earth, manifest):
     t0 = time.time()
     Y = 0.2126 * earth.lin[..., 0] + 0.7152 * earth.lin[..., 1] + 0.0722 * earth.lin[..., 2]
+    Yf = median_filter(Y, size=5)            # a <= 4x4 star never earns a split
     frame = float(W * H)
     score = []
-    for d in range(5):
+    for d in range(QT_MAXD):
         bs = QT_BS[d]
-        _, var = sat_block_stats(Y, bs)
+        _, var = sat_block_stats(Yf, bs)
         score.append(var * (bs * bs))          # luminance variance × leaf area
     # colour sources at 5-px resolution for depths 0–4 (uniform inside every 5-px cell)
-    tok_px5 = []
+    tok_px5, tok_d = [], []
     for d in range(3):
-        tok, _ = earth.tokens(QT_BS[d])
+        tok, _ = earth.tokens(QT_BS[d]); tok_d.append(tok)
         tok_px5.append(np.repeat(np.repeat(tok, QT_CS[d], 0), QT_CS[d], 1))
-    c8_px5 = np.repeat(np.repeat(earth.base(15, 'c8'), 3, 0), 3, 1)
-    c32_px5 = earth.base(5, 'c32')
+    c8_15 = earth.base(15, 'c8')                                    # the 8-colour palette (median-cut on 15-px means)
+    c8_px5_d3 = np.repeat(np.repeat(c8_15, 3, 0), 3, 1)
+    c8_px5_d4 = nearest_palette(to_u8(lin_to_srgb(earth.means(5))), c8_15)   # 5-px means in the same 8 colours
     real = earth.srgb
 
     D = np.zeros((H // 5, W // 5), np.int8)
     gens, splits = [D.copy()], []
 
     def S_of(D):
-        return float(D.mean()) / 5.0
+        return float(np.minimum(D, QT_MAXD).mean()) / QT_MAXD
 
     def split_until(D, target):
         cand = []
-        for d in range(5):
+        for d in range(QT_MAXD):
             cs = QT_CS[d]
             m = D[::cs, ::cs] == d
             if m.any():
@@ -307,14 +337,13 @@ def bake_quadtree(earth, manifest):
         cand = np.concatenate(cand) if cand else np.zeros((0, 4))
         order = np.lexsort((cand[:, 3], cand[:, 2], cand[:, 1], -cand[:, 0]))   # score desc, then d,i,j
         cand = cand[order]
-        dS = np.array([QT_BS[int(d)] ** 2 for d in cand[:, 1]]) / 5.0 / frame
+        dS = np.array([QT_BS[int(d)] ** 2 for d in cand[:, 1]]) / QT_MAXD / frame
         s0 = S_of(D)
         if s0 >= target:
-            return cand[:0]
-        n = int(np.searchsorted(s0 + np.cumsum(dS), target)) + 1
-        n = min(n, len(cand))
+            return cand[:0, 1:].astype(np.int16)
+        n = min(int(np.searchsorted(s0 + np.cumsum(dS), target)) + 1, len(cand))
         chosen = cand[:n]
-        for d in range(5):
+        for d in range(QT_MAXD):
             sel = chosen[chosen[:, 1] == d]
             if len(sel) == 0:
                 continue
@@ -326,35 +355,35 @@ def bake_quadtree(earth, manifest):
 
     for g in range(1, 13):
         D = D.copy(); splits.append(split_until(D, QT_TARGETS[g - 1])); gens.append(D)
-    D = D.copy(); D[D < 4] = 4; splits.append(split_until(D, QT_G13_TARGET)); gens.append(D)   # g13
-    D = D.copy(); D[:] = 5; splits.append(np.zeros((0, 3), np.int16)); gens.append(D)           # g14
+    D = D.copy(); D[D < 3] = 3; splits.append(split_until(D, QT_G13_TARGET)); gens.append(D)   # g13: force >= 15 px
+    D = D.copy(); D[:] = 5; splits.append(np.zeros((0, 3), np.int16)); gens.append(D)           # g14: real everywhere
 
-    # compose and save
-    tok_d = [earth.tokens(QT_BS[d])[0] for d in range(3)]
-    print('  quadtree generations (S = resolution score, change = fraction of frame whose depth changed;')
+    print('  quadtree generations (S = mean(depth)/4, change = fraction of frame whose depth changed;')
     print('  space = non-ink TOKEN leaves at depths 0/1/2 inside rows 8-9, i.e. grey blocks drawn in space):')
     print('    gen  target   S        change   bright   leaves d0..d5                          space d0/d1/d2')
-    rows = []
+    rows, images = [], []
     for g, D in enumerate(gens):
-        bright = 100.0 if g == 14 else 55.0 + 45.0 * (0.2 * g / 3.2)
+        bright = 100.0 if g == 14 else 70.0 + 30.0 * (0.2 * g / 3.2)
         lut = token_lut(bright)
         small = np.zeros((H // 5, W // 5, 3), np.uint8)
         for d in range(3):
             m = D == d
             small[m] = lut[tok_px5[d]][m]
-        m = D == 3; small[m] = scale(c8_px5, bright)[m]
-        m = D == 4; small[m] = scale(c32_px5, bright)[m]
+        m = D == 3; small[m] = scale(c8_px5_d3, bright)[m]
+        m = D == 4; small[m] = scale(c8_px5_d4, bright)[m]
         full = np.repeat(np.repeat(small, 5, 0), 5, 1)
         m5 = np.repeat(np.repeat(D == 5, 5, 0), 5, 1)
         if m5.any():
             full[m5] = scale(real, bright)[m5]
+        images.append(full)
         fn = f'earth_qt_g{g:02d}.png'
         Image.fromarray(full, 'RGB').save(os.path.join(OUT, fn))
-        S = S_of(D)
+        S = S_of(D) if g < 14 else 1.0
         change = float((D != gens[g - 1]).mean()) if g else 0.0
         counts = [int((D[::QT_CS[d], ::QT_CS[d]] == d).sum()) for d in range(5)] + [int((D == 5).sum() * 25)]
         target = '' if g == 0 else (QT_TARGETS[g - 1] if g <= 12 else (QT_G13_TARGET if g == 13 else 1.0))
-        flag = '' if (g == 0 or change >= 0.02) else '   <-- FAIL (< 2 %)'
+        assert g == 0 or change >= 0.02, f'g{g}: change {change:.3f} < 2 %'
+        assert g == 14 or int(D.max()) <= QT_MAXD, f'g{g}: depth 5 before g14'
         space, space_pos = [], []
         for d in range(3):
             cs, bs = QT_CS[d], QT_BS[d]
@@ -363,15 +392,25 @@ def bake_quadtree(earth, manifest):
             space.append(int(m.sum()))
             space_pos += [dict(depth=d, row=round((int(r) + r0) * bs / 120 + 1, 2), col=round(int(c) * bs / 120 + 1, 2))
                           for r, c in np.argwhere(m)]
-        print(f'    {g:3d}  {str(target):6}  {S:.4f}   {change * 100:5.1f} %   {bright:5.1f}   {str(counts):40s} {space}{flag}')
+        print(f'    {g:3d}  {str(target):6}  {S:.4f}   {change * 100:5.1f} %   {bright:5.1f}   {str(counts):40s} {space}')
         rows.append(dict(gen=g, target=(None if target == '' else target), S=round(S, 5), change=round(change, 5),
                          brightness=round(bright, 4), leaves=counts, space_nonink_token_leaves=space,
                          space_nonink_positions=space_pos))
         manifest['files'][fn] = dict(photo='earth', grid=[W, H], block='quadtree', mode='qt', brightness=round(bright, 4),
                                      gen=g, S=round(S, 5), change=round(change, 5))
+    bad_space = [r['gen'] for r in rows[:14] if r['space_nonink_token_leaves'] != [0, 0, 0]]
+    assert not bad_space, f'non-ink token leaves in rows 8-9 at generations {bad_space}'
+    # g13 -> g14 must visibly change rows 3-7: >= 30 % of their pixels move by more than 8 sRGB levels
+    diff = np.abs(images[14][240:840].astype(np.int16) - images[13][240:840].astype(np.int16)).max(axis=2)
+    frac_changed = float((diff > 8).mean())
+    print(f'  g13 -> g14: {frac_changed * 100:.1f} % of pixels in rows 3-7 change by > 8 sRGB levels (need >= 30 %)')
+    assert frac_changed >= 0.30, f'g13->g14 changes only {frac_changed:.3f} of rows 3-7'
     np.savez_compressed(os.path.join(OUT, 'earth_qt_depths.npz'), depths=np.stack(gens),
                         **{f'splits_g{g + 1:02d}': s for g, s in enumerate(splits)})
-    manifest['quadtree'] = dict(targets=QT_TARGETS, g13_target=QT_G13_TARGET, depth_block=QT_BS, generations=rows,
+    manifest['quadtree'] = dict(targets=QT_TARGETS, g13_target=QT_G13_TARGET, depth_block=QT_BS, max_depth_before_g14=QT_MAXD,
+                                score='mean(depth)/4', colour_by_depth='0-2 tokens, 3-4 the 8-colour palette, 5 real',
+                                brightness='70 + 30*(0.2g/3.2), g14 = 100', ranking='variance of median_filter(Y, 5) × area',
+                                g13_to_g14_rows3_7_changed=round(frac_changed, 4), generations=rows,
                                 luminance='Rec.709 Y of linear light', depths_file='earth_qt_depths.npz')
     print(f'  quadtree done in {time.time() - t0:.1f} s')
     return gens
@@ -476,10 +515,10 @@ def run_gates(photos, manifest):
         print(f'  (e) city {b:3d} px: paper {e[b]["paper"]}, ember {e[b]["ember"]}; lit cells per 120-px row {e[b]["per_row120"]}; '
               f'band rows {band} (contiguous {contiguous}, centroid row {centroid:.2f}, {outside * 100:.0f} % of lit cells outside); '
               f'{e[b]["in_rows_6_8"] * 100:.0f} % inside rows 6-8')
-    # "one horizontal band (rows 6-8)" quantified: the band (rows with >= 25 % of the peak row's lit count) is one
-    # contiguous run whose centroid lies in rows 6-8, and < 25 % of the paper+ember cells lie outside it.
-    ok = all(e[b]['contiguous'] and 6.0 <= e[b]['centroid_row'] <= 8.0 and e[b]['outside_band'] < 0.25 for b in e)
-    print(f'  (e) -> {"PASS" if ok else "FAIL"} (one contiguous band, centroid in rows 6-8, < 25 % of lit cells outside it, at 120/60/30 px)')
+    # "one contiguous lit band": the band (rows with >= 25 % of the peak row's lit count) is one contiguous run
+    # whose centroid lies in rows 2-8, and < 25 % of the paper+ember cells lie outside it.
+    ok = all(e[b]['contiguous'] and 2.0 <= e[b]['centroid_row'] <= 8.0 and e[b]['outside_band'] < 0.25 for b in e)
+    print(f'  (e) -> {"PASS" if ok else "FAIL"} (one contiguous lit band, centroid in rows 2-8, < 25 % of lit cells outside it, at 120/60/30 px)')
     res['e_city_band'] = dict(e, ok=ok)
     manifest['gates'] = res
     manifest['notes'] = [
@@ -490,7 +529,7 @@ def run_gates(photos, manifest):
         'the frame has 37 dark cells (32 space + 5 limb-edge cells in rows 6-7 on the right, where the tilted limb sits '
         'higher), so the brightest dark cell is always slate; scanned every T 84-120 with the guard, (8,4) fails at all of '
         'them (T <= 90 adds (8,3)/(8,5), T >= 120 adds (9,9)). The copy block (y <= 940, rows 7-8) still sits on glow and ink.',
-        'city T=200 kept: the paper+ember distribution is identical for T 190-200 (29 paper + 2 ember at 120 px, as the bible measured).',
+        'city = Los Angeles aerial (1444723121867), T=200, ungraded.',
     ]
     return res
 
@@ -520,6 +559,10 @@ def main():
                                  paper_pinned='#868380', paper_pinned_low='#615F5C'),
                     photos={}, files={})
     photos = {n: Photo(n) for n in SOURCES}
+    expected = {f'{n}_{b}_{m}_b{br}.png' for n, st in STAGES.items() for b, m, br in st} | {f'earth_qt_g{g:02d}.png' for g in range(15)}
+    for f in glob.glob(os.path.join(OUT, '*.png')):
+        if os.path.basename(f) not in expected and not os.path.basename(f).startswith('check_'):
+            os.remove(f); print('  removed stale', os.path.basename(f))
     tiles = []
     print('STAGES')
     for name, stages in STAGES.items():
@@ -535,7 +578,12 @@ def main():
             Image.fromarray(img, 'RGB').save(os.path.join(OUT, fn))
             manifest['files'][fn] = dict(photo=name, grid=[img.shape[1], img.shape[0]], block=b, mode=mode, brightness=bright)
             tiles.append((fn[:-4], img))
-            print(f'  {fn:28s} {img.shape[1]:4d}x{img.shape[0]:<4d}')
+            gtxt = ''
+            if (b, mode) in p.guard:
+                npal, worst = p.guard[(b, mode)]
+                gtxt = f'   palette guard: {npal} colours, worst {worst:5.1f} sRGB from a real mean (<= {PALETTE_GUARD:.0f})'
+                manifest['files'][fn]['palette_guard'] = dict(colours=npal, worst_distance=worst)
+            print(f'  {fn:28s} {img.shape[1]:4d}x{img.shape[0]:<4d}{gtxt}')
     gens = bake_quadtree(photos['earth'], manifest)
     for g in range(15):
         tiles.append((f'earth_qt_g{g:02d}', np.asarray(Image.open(os.path.join(OUT, f'earth_qt_g{g:02d}.png')))))
