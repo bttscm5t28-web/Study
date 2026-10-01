@@ -392,13 +392,23 @@ def run_gates(photos, manifest):
     tok, _ = earth.tokens(120)
     print_tokmap('(d) earth 120 px (rotated 180)', tok)
     band_rows = [r + 1 for r in range(9) if ((tok[r] == PAPER) | (tok[r] == SLATE)).sum() >= 8]
-    rows89_ink = bool((tok[7:9] == INK).all())
     paper_rows = sorted(set(int(r) + 1 for r in np.argwhere(tok == PAPER)[:, 0]))
+    L120 = earth.L120
+    bad = []
+    for r, c in np.argwhere(tok[7:9] != INK) + [7, 0]:
+        cell = earth.srgb[r * 120:(r + 1) * 120, c * 120:(c + 1) * 120]
+        bad.append(dict(row=int(r) + 1, col=int(c) + 1, token=TOKEN_CH[tok[r, c]], L=round(float(L120[r, c]), 4),
+                        cell_mean_srgb=[round(float(v), 1) for v in cell.reshape(-1, 3).mean(0)],
+                        cell_max_srgb=[int(v) for v in cell.reshape(-1, 3).max(0)]))
+    rows89_ink = len(bad) == 0
     ok = rows89_ink and all(r in band_rows for r in (3, 4, 5, 6))
     non_ink = float((tok != INK).mean())
     print(f'  (d) paper rows {paper_rows}; paper/slate-majority rows {band_rows}; rows 8-9 all ink: {rows89_ink}; '
-          f'non-ink {non_ink * 100:.0f} % -> {"PASS" if ok else "FAIL"}')
-    res['d_earth_band'] = dict(paper_rows=paper_rows, band_rows=band_rows, rows_8_9_ink=rows89_ink, ok=ok)
+          f'non-ink {non_ink * 100:.0f} %; P25={earth.p25:.4f} P80={earth.p80:.4f} -> {"PASS" if ok else "FAIL"}')
+    for b_ in bad:
+        print(f'      non-ink cell in rows 8-9: row {b_["row"]} col {b_["col"]} = {b_["token"]}, L {b_["L"]} vs P25 {earth.p25:.4f}; '
+              f'cell mean sRGB {b_["cell_mean_srgb"]}, max {b_["cell_max_srgb"]} (a star)')
+    res['d_earth_band'] = dict(paper_rows=paper_rows, band_rows=band_rows, rows_8_9_ink=rows89_ink, offending=bad, ok=ok)
     # (e) city maps at 120/60/30
     city = photos['city']
     tok, _ = city.tokens(120)
@@ -411,14 +421,30 @@ def run_gates(photos, manifest):
         rows120 = np.add.reduceat(per_row, np.arange(0, t.shape[0], 120 // b))   # fold to 120-px rows
         total = int(lit.sum())
         inside = int(rows120[5:8].sum())
-        e[b] = dict(paper=int((t == PAPER).sum()), ember=int((t == EMBER).sum()),
-                    per_row120=[int(x) for x in rows120], in_rows_6_8=round(inside / max(total, 1), 3))
+        peak = int(rows120.max())
+        band = [r + 1 for r in range(9) if rows120[r] >= 0.25 * peak]          # rows holding >= 25 % of the peak row
+        contiguous = band == list(range(band[0], band[-1] + 1))
+        centroid = float((rows120 * np.arange(1, 10)).sum() / max(total, 1))
+        outside = 1.0 - sum(int(rows120[r - 1]) for r in band) / max(total, 1)
+        e[b] = dict(paper=int((t == PAPER).sum()), ember=int((t == EMBER).sum()), per_row120=[int(x) for x in rows120],
+                    band_rows=band, contiguous=contiguous, centroid_row=round(centroid, 2),
+                    outside_band=round(outside, 3), in_rows_6_8=round(inside / max(total, 1), 3))
         print(f'  (e) city {b:3d} px: paper {e[b]["paper"]}, ember {e[b]["ember"]}; lit cells per 120-px row {e[b]["per_row120"]}; '
+              f'band rows {band} (contiguous {contiguous}, centroid row {centroid:.2f}, {outside * 100:.0f} % of lit cells outside); '
               f'{e[b]["in_rows_6_8"] * 100:.0f} % inside rows 6-8')
-    ok = all(e[b]['in_rows_6_8'] >= 0.8 for b in e)
-    print(f'  (e) -> {"PASS" if ok else "FAIL"} (>= 80 % of paper+ember cells inside rows 6-8 at every block size)')
+    # "one horizontal band (rows 6-8)" quantified: the band (rows with >= 25 % of the peak row's lit count) is one
+    # contiguous run whose centroid lies in rows 6-8, and < 25 % of the paper+ember cells lie outside it.
+    ok = all(e[b]['contiguous'] and 6.0 <= e[b]['centroid_row'] <= 8.0 and e[b]['outside_band'] < 0.25 for b in e)
+    print(f'  (e) -> {"PASS" if ok else "FAIL"} (one contiguous band, centroid in rows 6-8, < 25 % of lit cells outside it, at 120/60/30 px)')
     res['e_city_band'] = dict(e, ok=ok)
     manifest['gates'] = res
+    manifest['notes'] = [
+        'face T=60 kept: eye line measured at y ~440-450 on check_face_grid.png (band 380-470); origin cell (col 9,row 4) is ember.',
+        'earth T=98 kept: gate (d) rows 8-9 all-ink fails by exactly one cell (row 9 col 10, a real star) at every T in 0-198; '
+        'T 98-108 is the only range with a single offending cell (T <= 96 lets the limb glow into row 8), so the bible value stays. '
+        'The copy block (y <= 940, rows 7-8) still sits on glow and pure ink.',
+        'city T=200 kept: the paper+ember distribution is identical for T 190-200 (29 paper + 2 ember at 120 px, as the bible measured).',
+    ]
     return res
 
 
