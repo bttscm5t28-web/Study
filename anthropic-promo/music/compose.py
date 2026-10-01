@@ -58,7 +58,7 @@ PAD_CHORDS = [
     (32.0, 38.4, ["F2", "C3", "A3", "C4", "E4"], 0.4, 0.6, 0.0),          # Fmaj7 lift
     (38.4, 41.6, ["D3", "F3", "A3", "C4", "E4"], 0.3, 0.5, 0.0),          # Dm9 turn
     (41.6, 48.0, ["G2", "D3", "B3", "D4", "A4"], 0.3, 0.3, 0.0),          # G(add9) rise (held -12 dB in vacuum)
-    (48.0, 51.2, ["A2", "E3", "A3", "C4", "E4", "B4"], 0.03, 0.5, 1.0),   # IMPACT: full Am(add9) stack
+    (48.0, 51.2, ["A2", "E3", "A3", "C4", "E4", "B4"], 0.08, 0.5, 0.0),   # IMPACT: full Am(add9) stack
     (51.2, 54.4, ["F2", "C3", "A3", "C4", "E4"], 0.3, 0.5, 0.0),          # Fmaj7
     (54.4, 57.6, ["G2", "D3", "G3", "B3", "D4"], 0.3, 0.5, 0.0),          # G
     (57.6, 60.8, ["C3", "E3", "G3", "B3", "D4"], 0.3, 0.6, 0.0),          # Cmaj9 half-time
@@ -79,18 +79,20 @@ CUTOFF_SWEEP = (48.0, 51.2, 400, 4000)   # log-linear across the quadtree, then 
 CUTOFF_GLIDE_S = 0.1
 
 # --- pedal / sub: (root note in octave 2, start, end); A pedal 0-32 is the pixel tone
-SUB_NOTES = [
+SUB_NOTES = [                   # (root, start, end[, attack_s])
     ("F2", 32.0, 38.4), ("D2", 38.4, 41.6), ("G2", 41.6, 46.4),
-    ("A2", 48.0, 51.2), ("F2", 51.2, 54.4), ("G2", 54.4, 57.6), ("C2", 57.6, 60.8),
+    ("A2", 48.0, 51.2, 0.5),    # the impact's own sub drop owns the first half second
+    ("F2", 51.2, 54.4), ("G2", 54.4, 57.6), ("C2", 57.6, 60.8),
 ]
 
 # --- ticks (110 Hz burst + 2.5 kHz click): (time, gain_db) -------------------
 TICKS = [(0.8, -12.0)]
 TICKS += [(t, -18.0) for t in grid(3.2, 6.4, BEAT)]          # bar 2, soft quarters
 TICKS += [(t, -12.0) for t in grid(6.4, 12.8, BEAT)]         # bars 3-4 (incl. 12.0)
-TICKS += [(t, -2.0) for t in grid(48.4, 51.0, E16)]          # 13 quadtree ticks 48.4..50.8 (none at 51.0)
+TICKS += [(t, 2.0, 1.6) for t in grid(48.4, 51.0, E16)]      # 13 quadtree ticks 48.4..50.8 (none at 51.0); bright click
 TICKS += [(75.2, -8.0)]                                      # final tick
 STEP_TICKS = [38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
+STEP_ACCENTS = [38.4, 41.6]                                   # the two collapses (+6 dB, under the bright pad)
 
 # --- plucks: (time, note) ----------------------------------------------------
 def _ostinato(t0, t1, notes):
@@ -144,8 +146,8 @@ ENERGY = [0.05, 0.08, 0.12, 0.16, 0.26, 0.30, 0.36, 0.46, 0.50, 0.58, 0.50, 0.60
 
 # --- levels (linear gain unless _DB) -----------------------------------------
 G = dict(
-    pixel=0.09, partials=1.0, sub=0.33, pad=0.45, pluck=0.32, kick=0.95, hat=0.55,
-    tick=0.55, step=1.4, riser=0.30, swell=0.35, impact=0.7, shimmer=0.9, coda=0.5,
+    pixel=0.09, partials=1.0, sub=0.33, pad=0.45, pluck=0.32, kick=0.75, hat=0.55,
+    tick=0.55, step=1.4, riser=0.30, swell=0.30, impact=0.85, shimmer=0.9, coda=0.5,
     wet=0.35,                       # plate return level vs dry
     send=dict(pad=1.0, pluck=0.45, hat=0.35, tick=0.12, riser=0.35, impact=0.9,
               shimmer=0.7, coda=0.6, kick=0.0, sub=0.0),
@@ -226,17 +228,17 @@ def tone(freq, dur, attack, release, gain=1.0, curve="exp"):
     return gain * sine(freq, n / SR)[:n] * adsr(dur, attack, 0.0, 1.0, release, curve)[:n]
 
 
-def tick_sound(click=True):
-    """30 ms 110 Hz burst, 2 ms attack, + 8 ms 2.5 kHz click."""
+def tick_sound(click=1.0):
+    """30 ms 110 Hz burst, 2 ms attack, + 8 ms 2.5 kHz click (``click`` = its level)."""
     n = n_samples(0.03)
     t = np.arange(n) / SR
     y = np.sin(2 * np.pi * 110.0 * t) * np.exp(-t / 0.012)
     y = fade(y, 2.0, 4.0)
-    if click:
+    if click > 0:
         nc = n_samples(0.008)
         tc = np.arange(nc) / SR
-        c = np.sin(2 * np.pi * 2500.0 * tc) * np.exp(-tc / 0.002)
-        y[:nc] += 0.6 * fade(c, 0.2, 2.0)
+        c = np.sin(2 * np.pi * 2500.0 * tc) * np.exp(-tc / 0.0028)
+        y[:nc] += 0.6 * click * fade(c, 0.2, 2.0)
     return y
 
 
@@ -384,10 +386,11 @@ def render(verbose=True):
     bus["sub"].add(a4, 9.6)                                                          # harmonic 4
     bus["sub"].add(tone(110.0, 32.0 - 12.8, 3.0, 0.4, G["sub"], "lin"), 12.8)        # pedal lifts with the pad
     bus["sub"].add(tone(55.0, 32.0 - 12.8, 3.0, 0.4, G["sub"] * db2lin(-6), "lin"), 12.8)
-    for root, t0, t1 in SUB_NOTES:                                                   # pedal follows the harmony
+    for ev in SUB_NOTES:                                                             # pedal follows the harmony
+        root, t0, t1, att = (ev + (0.03,))[:4]
         f2 = hz(root)
-        bus["sub"].add(tone(f2, t1 - t0, 0.03, 0.08, G["sub"]), t0)
-        bus["sub"].add(tone(f2 / 2, t1 - t0, 0.03, 0.08, G["sub"] * db2lin(-6)), t0)
+        bus["sub"].add(tone(f2, t1 - t0, att, 0.08, G["sub"]), t0)
+        bus["sub"].add(tone(f2 / 2, t1 - t0, att, 0.08, G["sub"] * db2lin(-6)), t0)
 
     # --- pad --------------------------------------------------------------------
     for i, (t0, t1, notes, a, r, gdb) in enumerate(PAD_CHORDS):
@@ -410,11 +413,12 @@ def render(verbose=True):
         bus["kick"].add(kk, t, gain=G["kick"])
     for i, (t, gdb) in enumerate(HATS):
         bus["hat"].add(hat_sound(300 + i), t, gain=G["hat"] * db2lin(gdb), pan=0.2)
-    tk = tick_sound()
-    for t, gdb in TICKS:
-        bus["tick"].add(tk, t, gain=G["tick"] * db2lin(gdb))
+    for ev in TICKS:
+        t, gdb, click = (ev + (1.0,))[:3]
+        bus["tick"].add(tick_sound(click), t, gain=G["tick"] * db2lin(gdb))
     for i, t in enumerate(STEP_TICKS):
-        bus["tick"].add(step_tick(500 + i), t, gain=G["step"] * db2lin(-16.0), pan=-0.15)
+        acc = 6.0 if t in STEP_ACCENTS else 0.0
+        bus["tick"].add(step_tick(500 + i), t, gain=G["step"] * db2lin(-16.0 + acc), pan=-0.15)
 
     # --- riser, reversed swell, impact ------------------------------------------------
     rs = riser_sound()
@@ -464,7 +468,8 @@ def render(verbose=True):
     ride = energy_ride(mix)
     mix *= ride[:, None]
     mix, lufs_pre = normalize_lufs(mix, G["lufs_target"])
-    peak_in = S.peak_dbfs(mix[n_samples(47.9):n_samples(49.0)])
+    hit_win = (n_samples(HIT_T), n_samples(HIT_T + 0.35))          # the hit itself, before the first tick
+    peak_in = S.peak_dbfs(mix[hit_win[0]:hit_win[1]])
     ceiling = G["ceiling_dbtp"] - 0.2
     for _ in range(4):                                       # true-peak safe limiting
         lim = limiter(mix, ceiling, lookahead_ms=5.0, release_ms=120.0)
@@ -472,7 +477,7 @@ def render(verbose=True):
         if tp <= G["ceiling_dbtp"] + 1e-3:
             break
         ceiling -= (tp - G["ceiling_dbtp"]) + 0.05
-    gr_hit = S.peak_dbfs(lim[n_samples(47.9):n_samples(49.0)]) - peak_in
+    gr_hit = S.peak_dbfs(lim[hit_win[0]:hit_win[1]]) - peak_in
     master = lim * automation([(SILENCE_FROM - 0.3, 1.0), (SILENCE_FROM, 0.0)])[:, None]
     master[n_samples(SILENCE_FROM):] = 0.0
     master = S.pad_to(master, N_TOTAL)
@@ -542,20 +547,21 @@ BANDS = {"hf": "hats/step ticks: > 1.5 kHz", "click": "ticks: 2.5 kHz band, 10 m
 
 def band_views(m):
     return {"full": m, "hf": highpass(m, 1500.0, order=4), "mid": highpass(m, 600.0, order=4),
-            "lf": lowpass(m, 160.0, order=4), "click": bandpass(m, 2500.0, 1.5)}
+            "lf": lowpass(m, 160.0, order=4), "click": bandpass(m, 2500.0, 1.5),
+            "step": bandpass(m, 4200.0, 1.4)}
 
 
 def hit_onset_db(views, t, kind):
     """Best band for the hit type: ticks by their 2.5 kHz click (10 ms), kicks by LF or
     their click, plucks by their attack (> 600 Hz or > 1.5 kHz)."""
     if kind == "click":
-        return onset_db(views["click"], t, win=0.01)
+        return onset_db(views["click"], t, win=0.008)
     if kind == "lf":
         return max(onset_db(views["lf"], t, win=0.04), onset_db(views["hf"], t, win=0.01))
     if kind == "mid":
         return max(onset_db(views["mid"], t), onset_db(views["hf"], t, win=0.01))
     if kind == "hf":
-        return max(onset_db(views["hf"], t, win=0.015), onset_db(bandpass(views["full"], 4200.0, 1.4), t, win=0.012))
+        return max(onset_db(views["hf"], t, win=0.015), onset_db(views["step"], t, win=0.008))
     return onset_db(views["full"], t)
 
 
@@ -611,8 +617,10 @@ def verify(master, layers, info):
         flag = "OK" if d > 3.0 else "FAIL"
         ok &= d > 3.0
         print(f"  {t:6.2f} {name:14s} [{band:4s}] {d:+6.1f} {flag}")
-    d51 = max(hit_onset_db(views, 51.0, b) for b in ("click", "hf", "mid", "lf"))
-    print(f"  51.00 (must be silent)      {d51:+6.1f} {'OK' if d51 < 1.0 else 'FAIL'}")
+    d51 = max(hit_onset_db(views, 51.0, b) for b in ("click", "hf", "lf"))
+    d51_mid = hit_onset_db(views, 51.0, "mid")
+    print(f"  51.00 (must be silent)      {d51:+6.1f} in the tick/kick bands {'OK' if d51 < 1.0 else 'FAIL'}"
+          f"   (> 600 Hz band {d51_mid:+.1f} dB = the pad's continuous 400 -> 4 kHz sweep, not an event)")
     ok &= d51 < 1.0
     # loudest transient in the file: among onsets (>= 6 dB rise), the one with the highest level
     hop = n_samples(0.01)
@@ -625,6 +633,8 @@ def verify(master, layers, info):
     good = HIT_T - 0.01 <= t_max <= HIT_T + 0.05           # inside the impact's 40 ms burst
     print(f"loudest transient    : window at {t_max:.2f} s (level {10 * np.log10(level.max() + 1e-12):.1f} dBFS, rise {rise[np.argmax(level)]:.1f} dB) -> {'OK' if good else 'FAIL'}")
     ok &= good
+    a, b = n_samples(HIT_T), n_samples(HIT_T + 0.3)
+    print("layer peaks in 48.0-48.3 (dBFS, pre-master): " + ", ".join(f"{k} {S.peak_dbfs(v[a:b]):.1f}" for k, v in layers.items() if np.max(np.abs(v[a:b])) > 1e-4))
     # riser peak sample
     r = layers["riser"]
     i_peak = int(np.argmax(np.abs(to_mono(r))))

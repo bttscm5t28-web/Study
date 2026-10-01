@@ -38,7 +38,14 @@ SOURCES = {
     'face':   dict(file='1438761681033-6461ffad8d80.jpg', window=(0, 60), rotate=False),
     'people': dict(file='1511632765486-a01980e01a18.jpg', window=(0, 200), rotate=False),
     'city':   dict(file='1474181487882-5abf3f0ba6c2.jpg', window=(0, 200), rotate=False),
-    'earth':  dict(file='1451187580459-43490279c0fa.jpg', window=(0, 98), rotate=True),
+    # STAR GUARD (earth only): the colour fed to the 4-token decision at 120/60/30 px (and to quadtree depths
+    # 0-2, whose drawn colour is the token anyway) is a TRIMMED block mean that excludes the brightest
+    # max(0.5 % of the cell's pixels, 16 pixels), pixels ranked by linear luminance. A star is a <= 4x4 cluster
+    # (~0.1 % of a 120-px cell; 16 px is 1.8 % of a 30-px cell, where 0.5 % = 5 px would not cover it), while
+    # the lit coast has far more lit pixels than that, so the paper/slate band is unaffected. P25/P80 are
+    # computed from the same trimmed means. Real-colour stages (c8/c32/full, depths 3-5) are untouched.
+    'earth':  dict(file='1451187580459-43490279c0fa.jpg', window=(0, 98), rotate=True,
+                   star_guard=dict(frac=0.005, min_px=16)),
     'sky':    dict(file='1444703686981-a3abbc4d4fe3_2880.jpg', window=(258, 840), rotate=False),
 }
 
@@ -99,6 +106,20 @@ def block_means(lin, b):
     if b == 1:
         return lin
     return lin.reshape(H // b, b, W // b, b, 3).mean(axis=(1, 3))
+
+
+def trimmed_block_means(lin, b, frac, min_px):
+    """Block mean over each b-px cell after dropping its brightest max(ceil(frac*n), min_px) pixels (by Rec.709 Y
+    of linear light). Used only for the token decision of a star-guarded photo."""
+    n = b * b
+    k = max(int(np.ceil(frac * n)), min_px)
+    if k <= 0:
+        return block_means(lin, b)
+    cells = lin.reshape(H // b, b, W // b, b, 3).transpose(0, 2, 1, 3, 4).reshape(H // b, W // b, n, 3)
+    Y = 0.2126 * cells[..., 0] + 0.7152 * cells[..., 1] + 0.0722 * cells[..., 2]
+    keep = n - k
+    idx = np.argpartition(Y, keep - 1, axis=-1)[..., :keep]
+    return np.take_along_axis(cells, idx[..., None], axis=2).mean(axis=2)
 
 
 def quantize_tokens(lin_means, p25, p80):
@@ -180,9 +201,11 @@ class Photo:
         self.srgb = np.asarray(im.crop(self.window))            # (1080,1920,3) uint8
         self.lin = _LUT_LIN[self.srgb]                           # linear light float64
         self._means = {}
+        self._tok_means = {}
         self._base = {}
-        # frozen 4-token thresholds from the 144 block means at 120 px
-        self.L120 = oklab(self.means(120))[0]
+        self.star_guard = spec.get('star_guard')
+        # frozen 4-token thresholds from the 144 (star-guarded, if so) block means at 120 px
+        self.L120 = oklab(self.tok_means(120))[0]
         self.p25, self.p80 = float(np.percentile(self.L120, 25)), float(np.percentile(self.L120, 80))
 
     def means(self, b):
@@ -190,8 +213,16 @@ class Photo:
             self._means[b] = block_means(self.lin, b)
         return self._means[b]
 
+    def tok_means(self, b):
+        """The linear block means the 4-token decision sees: plain, or star-guarded trimmed means."""
+        if not self.star_guard:
+            return self.means(b)
+        if b not in self._tok_means:
+            self._tok_means[b] = trimmed_block_means(self.lin, b, self.star_guard['frac'], self.star_guard['min_px'])
+        return self._tok_means[b]
+
     def tokens(self, b):
-        return quantize_tokens(self.means(b), self.p25, self.p80)
+        return quantize_tokens(self.tok_means(b), self.p25, self.p80)
 
     def base(self, b, mode):
         """Brightness-independent stage data. tok/tok2 -> (tok, L); c8/c32/full -> sRGB uint8."""
@@ -299,8 +330,10 @@ def bake_quadtree(earth, manifest):
     D = D.copy(); D[:] = 5; splits.append(np.zeros((0, 3), np.int16)); gens.append(D)           # g14
 
     # compose and save
-    print('  quadtree generations (S = resolution score, change = fraction of frame whose depth changed):')
-    print('    gen  target   S        change   bright   leaves d0..d5')
+    tok_d = [earth.tokens(QT_BS[d])[0] for d in range(3)]
+    print('  quadtree generations (S = resolution score, change = fraction of frame whose depth changed;')
+    print('  space = non-ink TOKEN leaves at depths 0/1/2 inside rows 8-9, i.e. grey blocks drawn in space):')
+    print('    gen  target   S        change   bright   leaves d0..d5                          space d0/d1/d2')
     rows = []
     for g, D in enumerate(gens):
         bright = 100.0 if g == 14 else 55.0 + 45.0 * (0.2 * g / 3.2)
@@ -322,9 +355,18 @@ def bake_quadtree(earth, manifest):
         counts = [int((D[::QT_CS[d], ::QT_CS[d]] == d).sum()) for d in range(5)] + [int((D == 5).sum() * 25)]
         target = '' if g == 0 else (QT_TARGETS[g - 1] if g <= 12 else (QT_G13_TARGET if g == 13 else 1.0))
         flag = '' if (g == 0 or change >= 0.02) else '   <-- FAIL (< 2 %)'
-        print(f'    {g:3d}  {str(target):6}  {S:.4f}   {change * 100:5.1f} %   {bright:5.1f}   {counts}{flag}')
+        space, space_pos = [], []
+        for d in range(3):
+            cs, bs = QT_CS[d], QT_BS[d]
+            r0 = 840 // bs
+            m = (D[::cs, ::cs] == d)[r0:] & (tok_d[d][r0:] != INK)
+            space.append(int(m.sum()))
+            space_pos += [dict(depth=d, row=round((int(r) + r0) * bs / 120 + 1, 2), col=round(int(c) * bs / 120 + 1, 2))
+                          for r, c in np.argwhere(m)]
+        print(f'    {g:3d}  {str(target):6}  {S:.4f}   {change * 100:5.1f} %   {bright:5.1f}   {str(counts):40s} {space}{flag}')
         rows.append(dict(gen=g, target=(None if target == '' else target), S=round(S, 5), change=round(change, 5),
-                         brightness=round(bright, 4), leaves=counts))
+                         brightness=round(bright, 4), leaves=counts, space_nonink_token_leaves=space,
+                         space_nonink_positions=space_pos))
         manifest['files'][fn] = dict(photo='earth', grid=[W, H], block='quadtree', mode='qt', brightness=round(bright, 4),
                                      gen=g, S=round(S, 5), change=round(change, 5))
     np.savez_compressed(os.path.join(OUT, 'earth_qt_depths.npz'), depths=np.stack(gens),
@@ -397,9 +439,11 @@ def run_gates(photos, manifest):
     bad = []
     for r, c in np.argwhere(tok[7:9] != INK) + [7, 0]:
         cell = earth.srgb[r * 120:(r + 1) * 120, c * 120:(c + 1) * 120]
+        mx = cell.reshape(-1, 3).max(0)
         bad.append(dict(row=int(r) + 1, col=int(c) + 1, token=TOKEN_CH[tok[r, c]], L=round(float(L120[r, c]), 4),
                         cell_mean_srgb=[round(float(v), 1) for v in cell.reshape(-1, 3).mean(0)],
-                        cell_max_srgb=[int(v) for v in cell.reshape(-1, 3).max(0)]))
+                        cell_max_srgb=[int(v) for v in mx],
+                        cause='star (bright point in a black cell)' if mx.max() > 150 else 'diffuse limb glow'))
     rows89_ink = len(bad) == 0
     ok = rows89_ink and all(r in band_rows for r in (3, 4, 5, 6))
     non_ink = float((tok != INK).mean())
@@ -407,7 +451,7 @@ def run_gates(photos, manifest):
           f'non-ink {non_ink * 100:.0f} %; P25={earth.p25:.4f} P80={earth.p80:.4f} -> {"PASS" if ok else "FAIL"}')
     for b_ in bad:
         print(f'      non-ink cell in rows 8-9: row {b_["row"]} col {b_["col"]} = {b_["token"]}, L {b_["L"]} vs P25 {earth.p25:.4f}; '
-              f'cell mean sRGB {b_["cell_mean_srgb"]}, max {b_["cell_max_srgb"]} (a star)')
+              f'cell mean sRGB {b_["cell_mean_srgb"]}, max {b_["cell_max_srgb"]} -> {b_["cause"]}')
     res['d_earth_band'] = dict(paper_rows=paper_rows, band_rows=band_rows, rows_8_9_ink=rows89_ink, offending=bad, ok=ok)
     # (e) city maps at 120/60/30
     city = photos['city']
@@ -440,9 +484,12 @@ def run_gates(photos, manifest):
     manifest['gates'] = res
     manifest['notes'] = [
         'face T=60 kept: eye line measured at y ~440-450 on check_face_grid.png (band 380-470); origin cell (col 9,row 4) is ember.',
-        'earth T=98 kept: gate (d) rows 8-9 all-ink fails by exactly one cell (row 9 col 10, a real star) at every T in 0-198; '
-        'T 98-108 is the only range with a single offending cell (T <= 96 lets the limb glow into row 8), so the bible value stays. '
-        'The copy block (y <= 940, rows 7-8) still sits on glow and pure ink.',
+        'earth T=98 kept, STAR GUARD on (trimmed mean, brightest max(0.5 %, 16 px) of each cell excluded from the token '
+        'decision): the star cells no longer quantize to slate at any token depth. Gate (d) rows 8-9 all-ink still fails by '
+        'exactly one cell, now (8,4) = the limb glow dipping into row 8 at the left: the percentile rule fixes 36 ink cells, '
+        'the frame has 37 dark cells (32 space + 5 limb-edge cells in rows 6-7 on the right, where the tilted limb sits '
+        'higher), so the brightest dark cell is always slate; scanned every T 84-120 with the guard, (8,4) fails at all of '
+        'them (T <= 90 adds (8,3)/(8,5), T >= 120 adds (9,9)). The copy block (y <= 940, rows 7-8) still sits on glow and ink.',
         'city T=200 kept: the paper+ember distribution is identical for T 190-200 (29 paper + 2 ember at 120 px, as the bible measured).',
     ]
     return res
@@ -481,7 +528,7 @@ def main():
         manifest['photos'][name] = dict(file=SOURCES[name]['file'], source_size=list(p.src_size),
                                         rotate180=SOURCES[name]['rotate'], window=list(p.window),
                                         P25=round(p.p25, 5), P80=round(p.p80, 5), tokmap120=tokmap_strings(tok120),
-                                        graded=name in GRADED)
+                                        graded=name in GRADED, star_guard=SOURCES[name].get('star_guard'))
         for b, mode, bright in stages:
             img = p.render(b, mode, bright)
             fn = f'{name}_{b}_{mode}_b{bright}.png'
