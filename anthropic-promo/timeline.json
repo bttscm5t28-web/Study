@@ -1,0 +1,10 @@
+{
+  "fps": 30, "width": 1920, "height": 1080,
+  "bpm": 96, "duration": 6,
+  "music": "music/track.wav",
+  "photos": [
+    {"key": "earth", "file": "assets/photos/1451187580459-43490279c0fa.jpg"},
+    {"key": "stars", "file": "assets/photos/1519681393784-d120267933ba.jpg"},
+    {"key": "face", "file": "assets/photos/1438761681033-6461ffad8d80.jpg"}
+  ]
+}

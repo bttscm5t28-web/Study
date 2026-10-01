@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Claude Fable 5.1 — promo</title>
+<style>
+  html,body{margin:0;background:#000;height:100%;overflow:hidden}
+  canvas{display:block;width:1920px;height:1080px}
+  body.fit canvas{width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;margin:auto;position:absolute;inset:0}
+  @font-face{font-family:'Inter';font-weight:300;src:url(assets/fonts/Inter-300-normal.ttf)}
+  @font-face{font-family:'Inter';font-weight:400;src:url(assets/fonts/Inter-400-normal.ttf)}
+  @font-face{font-family:'Inter';font-weight:500;src:url(assets/fonts/Inter-500-normal.ttf)}
+  @font-face{font-family:'Inter';font-weight:600;src:url(assets/fonts/Inter-600-normal.ttf)}
+  @font-face{font-family:'Inter';font-weight:700;src:url(assets/fonts/Inter-700-normal.ttf)}
+  @font-face{font-family:'Inter';font-weight:800;src:url(assets/fonts/Inter-800-normal.ttf)}
+  @font-face{font-family:'Space Grotesk';font-weight:300;src:url(assets/fonts/Space_Grotesk-300-normal.ttf)}
+  @font-face{font-family:'Space Grotesk';font-weight:400;src:url(assets/fonts/Space_Grotesk-400-normal.ttf)}
+  @font-face{font-family:'Space Grotesk';font-weight:500;src:url(assets/fonts/Space_Grotesk-500-normal.ttf)}
+  @font-face{font-family:'Space Grotesk';font-weight:700;src:url(assets/fonts/Space_Grotesk-700-normal.ttf)}
+  @font-face{font-family:'Instrument Serif';font-weight:400;font-style:normal;src:url(assets/fonts/Instrument_Serif-400-normal.ttf)}
+  @font-face{font-family:'Instrument Serif';font-weight:400;font-style:italic;src:url(assets/fonts/Instrument_Serif-400-italic.ttf)}
+  @font-face{font-family:'Noto Sans SC';font-weight:300;src:url(assets/fonts/NotoSansSC-300.ttf)}
+  @font-face{font-family:'Noto Sans SC';font-weight:400;src:url(assets/fonts/NotoSansSC-400.ttf)}
+  @font-face{font-family:'Noto Sans SC';font-weight:500;src:url(assets/fonts/NotoSansSC-500.ttf)}
+  @font-face{font-family:'Noto Sans SC';font-weight:700;src:url(assets/fonts/NotoSansSC-700.ttf)}
+  @font-face{font-family:'Noto Sans SC';font-weight:900;src:url(assets/fonts/NotoSansSC-900.ttf)}
+  @font-face{font-family:'Noto Serif SC';font-weight:400;src:url(assets/fonts/NotoSerifSC-400.ttf)}
+  @font-face{font-family:'Noto Serif SC';font-weight:600;src:url(assets/fonts/NotoSerifSC-600.ttf)}
+  @font-face{font-family:'Noto Serif SC';font-weight:700;src:url(assets/fonts/NotoSerifSC-700.ttf)}
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<audio id="music" preload="auto"></audio>
+<script src="src/engine.js"></script>
+<script src="src/scenes.js"></script>
+<script>
+(async function () {
+  const q = new URLSearchParams(location.search);
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+  const tl = await (await fetch('timeline.json')).json();
+  F.setTimeline(tl);
+  // load fonts explicitly (every face used)
+  const faces = [];
+  for (const fam of ['Inter', 'Space Grotesk', 'Instrument Serif', 'Noto Sans SC', 'Noto Serif SC']) {
+    for (const w of [300, 400, 500, 600, 700, 800, 900]) faces.push(document.fonts.load(`${w} 40px "${fam}"`, '智能 Claude').catch(() => {}));
+    faces.push(document.fonts.load(`italic 400 40px "${fam}"`, 'Claude').catch(() => {}));
+  }
+  await Promise.all(faces);
+  await document.fonts.ready;
+  // load photos listed in timeline
+  await Promise.all((tl.photos || []).map(p => F.loadImage(p.key, p.file)));
+  if (window.SCENES_INIT) await window.SCENES_INIT(ctx);
+  window.renderFrame = function (i) {
+    const t = i / F.fps;
+    ctx.save(); ctx.globalAlpha = 1; ctx.filter = 'none'; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, F.W, F.H);
+    window.drawFilm(ctx, t);
+    ctx.restore();
+    return t;
+  };
+  window.totalFrames = Math.round(tl.duration * F.fps);
+  window.READY = true;
+  if (q.has('t')) { window.renderFrame(Math.round(parseFloat(q.get('t')) * F.fps)); }
+  if (q.has('play')) {
+    document.body.classList.add('fit');
+    const au = document.getElementById('music'); au.src = tl.music || 'music/track.wav';
+    const start = () => { const t0 = performance.now(); au.currentTime = 0; au.play().catch(() => {}); const loop = () => { const t = (performance.now() - t0) / 1000; if (t > tl.duration) return; window.renderFrame(Math.floor(t * F.fps)); requestAnimationFrame(loop); }; loop(); };
+    document.body.addEventListener('click', start, { once: true });
+    window.renderFrame(0);
+    const hint = document.createElement('div'); hint.textContent = 'click to play'; hint.style.cssText = 'position:fixed;left:16px;top:12px;color:#888;font:14px Inter,sans-serif'; document.body.appendChild(hint);
+    document.body.addEventListener('click', () => hint.remove(), { once: true });
+  }
+})();
+</script>
+</body>
+</html>

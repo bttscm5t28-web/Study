@@ -1,0 +1,4 @@
+assets/fonts/NotoSansSC-*.ttf
+assets/fonts/NotoSerifSC-*.ttf
+build/
+node_modules/
