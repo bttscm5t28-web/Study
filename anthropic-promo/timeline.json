@@ -29,10 +29,6 @@
    "file": "build/bake/face_15_c8_b85.png"
   },
   {
-   "key": "face_5_c32_b92",
-   "file": "build/bake/face_5_c32_b92.png"
-  },
-  {
    "key": "face_1_full_b100",
    "file": "build/bake/face_1_full_b100.png"
   },
@@ -77,32 +73,8 @@
    "file": "build/bake/city_15_c8_b85.png"
   },
   {
-   "key": "city_5_c32_b92",
-   "file": "build/bake/city_5_c32_b92.png"
-  },
-  {
-   "key": "city_5_full_b96",
-   "file": "build/bake/city_5_full_b96.png"
-  },
-  {
    "key": "city_1_full_b100",
    "file": "build/bake/city_1_full_b100.png"
-  },
-  {
-   "key": "city_5_c32_b90",
-   "file": "build/bake/city_5_c32_b90.png"
-  },
-  {
-   "key": "city_15_c8_b83",
-   "file": "build/bake/city_15_c8_b83.png"
-  },
-  {
-   "key": "city_60_tok2_b76",
-   "file": "build/bake/city_60_tok2_b76.png"
-  },
-  {
-   "key": "city_120_tok_b70",
-   "file": "build/bake/city_120_tok_b70.png"
   },
   {
    "key": "sky_1_full_b100",
@@ -167,6 +139,30 @@
   {
    "key": "earth_qt_g14",
    "file": "build/bake/earth_qt_g14.png"
+  },
+  {
+   "key": "face_15_tok_b80",
+   "file": "build/bake/face_15_tok_b80.png"
+  },
+  {
+   "key": "face_5_c8_b92",
+   "file": "build/bake/face_5_c8_b92.png"
+  },
+  {
+   "key": "city_5_c8_b92",
+   "file": "build/bake/city_5_c8_b92.png"
+  },
+  {
+   "key": "city_5_c32_b96",
+   "file": "build/bake/city_5_c32_b96.png"
+  },
+  {
+   "key": "city_60_tok2_b60",
+   "file": "build/bake/city_60_tok2_b60.png"
+  },
+  {
+   "key": "city_120_tok_b50",
+   "file": "build/bake/city_120_tok_b50.png"
   }
  ]
 }

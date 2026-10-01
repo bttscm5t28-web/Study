@@ -71,6 +71,15 @@
     ctx.textAlign = 'left';
     if (blur > 0) ctx.filter = `blur(${blur}px)`;
     const sp = tracking * size;
+    const cjk = (fam === 'zh' || fam === 'zhserif') && /[，。？！、：；]/.test(str);
+    if (cjk) {
+      // 标点挤压: full-width punctuation advances 0.55 em (ink sits in the left half of its em box); CJK glyphs keep the tracking
+      const chars = Array.from(str); const adv = chars.map(c => /[，。？！、：；]/.test(c) ? size * 0.55 : ctx.measureText(c).width + sp);
+      const visible = adv.reduce((a, b) => a + b, 0) - sp;
+      let cx = x; if (align === 'center') cx = x - visible / 2; else if (align === 'right') cx = x - visible;
+      for (let i = 0; i < chars.length; i++) { ctx.fillText(chars[i], cx, y); cx += adv[i]; }
+      ctx.restore(); return visible;
+    }
     if ('letterSpacing' in ctx) ctx.letterSpacing = sp + 'px';
     let w = ctx.measureText(str).width;
     if (!('letterSpacing' in ctx)) w += sp * (Array.from(str).length - 1);

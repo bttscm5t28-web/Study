@@ -36,8 +36,7 @@ const server = http.createServer((req, res) => {
   const ff = ['-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', '-'];
   const hasMusic = fs.existsSync(path.join(ROOT, music));
   if (hasMusic) ff.push('-ss', (from / 30).toFixed(3), '-i', path.join(ROOT, music));
-  ff.push('-c:v', 'libx264', '-preset', preview ? 'veryfast' : 'medium', '-crf', preview ? '23' : '17', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level', '4.1', '-movflags', '+faststart', '-r', String(fps));
-  if (preview) ff.push('-vf', 'scale=960:-2');
+  ff.push('-c:v', 'libx264', '-preset', preview ? 'veryfast' : 'medium', '-crf', preview ? '23' : '17', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level', '4.1', '-movflags', '+faststart', '-r', String(fps), '-vf', (preview ? 'scale=960:-2,' : '') + 'scale=out_color_matrix=bt709:out_range=tv', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv');
   if (hasMusic) ff.push('-c:a', 'aac', '-b:a', '256k', '-shortest');
   ff.push(path.join(ROOT, out));
   const ffm = spawn('ffmpeg', ff, { stdio: ['pipe', 'inherit', 'inherit'] });

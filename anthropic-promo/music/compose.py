@@ -70,10 +70,10 @@ PAD_PANS = (-0.6, 0.0, 0.6)
 
 # --- pad filter = resolution (§1.4 h): (time, cutoff Hz), 100 ms glides ------
 CUTOFF_STEPS = [
-    (0.0, 400), (12.8, 400), (19.2, 600), (22.4, 900), (28.8, 1400), (31.2, 2200),
+    (0.0, 400), (12.8, 400), (19.2, 600), (22.4, 900), (25.6, 1400), (28.8, 2200), (31.2, 3000),
     (32.0, 4000), (38.4, 400), (39.2, 600), (40.0, 900), (40.8, 4000),
     (41.6, 400), (42.4, 600), (42.8, 900), (43.2, 900), (43.6, 1400), (44.0, 2200),
-    (44.4, 2200), (44.8, 4000), (46.4, 2200), (46.8, 1400), (47.2, 600), (47.6, 400),
+    (44.4, 2200), (44.8, 4000), (46.4, 1400), (46.8, 900), (47.2, 600), (47.6, 400),
 ]
 CUTOFF_SWEEP = (48.0, 51.2, 400, 4000)   # log-linear across the quadtree, then 4 kHz to the end
 CUTOFF_GLIDE_S = 0.1
@@ -96,7 +96,8 @@ TICKS += [(75.2, -8.0)]                                      # final tick
 QT_TICKS = [(t, 0.30, 0.30 * 10 ** (9.7 / 20 * i / 12), 2500.0 * 2.0 ** (i / 12))
             for i, t in enumerate(grid(48.4, 51.0, E16))]
 QT_CLICK_TAU = 0.004                                         # click decay inside its 8 ms
-STEP_TICKS = [38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
+STEP_TICKS = [24.0, 25.6, 27.2,                              # agent line fork / face 30->15 px / merge
+              38.4, 38.8, 39.2, 40.0, 40.8, 41.6, 42.0]      # -16 dB band-passed noise
 STEP_ACCENTS = [38.4, 41.6]                                   # the two collapses (+6 dB, under the bright pad)
 
 # --- plucks: (time, note) ----------------------------------------------------
@@ -711,6 +712,10 @@ def verify(master, layers, info):
         if name == "qt tick":
             qt_hf.append(hf_r)
         print(f"  {t:6.2f} {name:14s} [{band:5s}] {d:+6.1f} {flag:4s} | LF {lf_r:+6.1f}  HF {hf_r:+6.1f}")
+    new_steps = {t: onset_db(views["step"], t, win=0.012) for t in (24.0, 25.6, 27.2)}
+    print("new step ticks, 3-6 kHz band rise (dB): " + ", ".join(f"{t} {d:+.1f}" for t, d in new_steps.items())
+          + f" -> {'OK' if min(new_steps.values()) >= 8.0 else 'FAIL'} (>= +8 dB required)")
+    ok &= min(new_steps.values()) >= 8.0
     qt_ok = min(qt_hf) >= 8.0
     print(f"quadtree ticks HF(>1.2 kHz, 40 ms) rise: min {min(qt_hf):+.1f} dB, max {max(qt_hf):+.1f} dB -> {'OK' if qt_ok else 'FAIL'} (>= +8 dB required)")
     ok &= qt_ok
